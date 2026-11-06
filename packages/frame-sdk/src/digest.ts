@@ -1,3 +1,4 @@
+import { type RecoveryDigest, recoveryDigestTypedData, recoveryDigestTypes } from "@voxy/chain";
 import {
   type Address,
   getAddress,
@@ -9,31 +10,12 @@ import {
   zeroAddress,
 } from "viem";
 
-export const recoveryTypes = {
-  RecoveryDigest: [
-    { name: "chainId", type: "uint256" },
-    { name: "wallet", type: "address" },
-    { name: "newKey", type: "address" },
-    { name: "ownerEpoch", type: "uint64" },
-    { name: "rosterEpoch", type: "uint64" },
-    { name: "rosterHash", type: "bytes32" },
-    { name: "deadline", type: "uint64" },
-    { name: "requestId", type: "bytes32" },
-    { name: "callHash", type: "bytes32" },
-  ],
-} as const;
-
-export type RecoveryDigest = {
-  chainId: bigint;
-  wallet: Address;
-  newKey: Address;
-  ownerEpoch: bigint;
-  rosterEpoch: bigint;
-  rosterHash: Hex;
-  deadline: bigint;
-  requestId: Hex;
-  callHash: Hex;
-};
+// The canonical EIP-712 RecoveryDigest definition lives in @voxy/chain, whose tests assert its
+// domain separator byte-for-byte against the live deployed VoxyWallet/RosterRegistry. frame-sdk
+// re-exports that single source of truth and adds strict JSON parsing + a Solidity-faithful
+// signature gate on top, so the SDK and the contracts can never silently drift.
+export type { RecoveryDigest };
+export const recoveryTypes = recoveryDigestTypes;
 
 export function object(input: unknown): Record<string, unknown> {
   if (!input || typeof input !== "object" || Array.isArray(input))
@@ -85,19 +67,10 @@ export function parseRecovery(input: unknown): RecoveryDigest {
   return result;
 }
 
+/** Build the typed data via the canonical @voxy/chain helper, after strict parsing. */
 export function recoveryTypedData(input: RecoveryDigest) {
   const message = parseRecovery(input);
-  return {
-    domain: {
-      name: "Voxy",
-      version: "1",
-      chainId: message.chainId,
-      verifyingContract: message.wallet,
-    },
-    types: recoveryTypes,
-    primaryType: "RecoveryDigest" as const,
-    message,
-  };
+  return recoveryDigestTypedData(Number(message.chainId), message.wallet, message);
 }
 
 export const recoveryHash = (message: RecoveryDigest) => hashTypedData(recoveryTypedData(message));

@@ -53,6 +53,9 @@ importers:
 
   packages/frame-sdk:
     dependencies:
+      '@voxy/chain':
+        specifier: workspace:*
+        version: link:../chain
       viem:
         specifier: ^2.38.0
         version: 2.57.16(typescript@5.9.3)
