@@ -44,7 +44,7 @@ Default maximum cost: 0.01 tGLM per write. See [Arkiv usage](arkiv/how-you-use-a
 
 ## Tests
 
-**40 automated tests across four suites**, plus live-network checks. All test real behaviour — no
+**46 automated tests across four suites**, plus live-network checks. All test real behaviour — no
 mocked RPC or contract responses; the TS EIP-712 suite asserts against the **live deployed**
 contracts' domain separators and a `cast`-computed digest golden, and the Foundry suites use real
 cryptographic signatures.
@@ -52,7 +52,7 @@ cryptographic signatures.
 | Suite | Count | Command | Covers |
 |---|---|---|---|
 | Foundry — devnet contracts | 9 | `cd contracts/devnet && forge test` | `VoxyWallet` quorum/add-only/replay/revoked-guardian/add-delay/frozen (7) + ENS→registry integration (2) |
-| Foundry — Sepolia contracts | 9 | `cd contracts/sepolia && forge test` | `VoxyDelegate` 7702 EOA recovery: quorum, add-only, execute-by-controller, replay, frozen, **real `vm.signAndAttachDelegation` 7702 test** |
+| Foundry — Sepolia contracts | 15 | `cd contracts/sepolia && forge test` | `VoxyDelegate` 7702 EOA recovery incl. real `vm.signAndAttachDelegation` (9) + `VoxyGuardianRegistry` — **non-ENS guardians**, revoke/expiry fail-closed, and end-to-end recovery of a delegate through our own registry (6) |
 | TypeScript — packages | 20 | `pnpm test` | `@voxy/chain` EIP-712 vs live contracts + RecoveryDigest golden (6), `@voxy/attester` attestation signing/binding/determinism (4), `@voxy/orchestrator` guardian signing/binding (2), `@voxy/frame-sdk` + `@voxy/arkiv` parsing/signature/schema (8) |
 | Web — `apps/web` | 2 | `cd apps/web && node --test` | ENS input normalization + ASCII portal frames |
 
