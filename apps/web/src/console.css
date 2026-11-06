@@ -356,6 +356,22 @@ select.vc-slot-input { cursor: pointer; }
   color: var(--muted);
 }
 .vc-enter .vc-fine { margin-top: 4px; }
+.vc-or {
+  display: flex;
+  align-items: center;
+  text-align: center;
+  color: var(--muted);
+  font-family: "DM Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin: 2px 0;
+}
+.vc-or::before,
+.vc-or::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
+.vc-or span { padding: 0 12px; }
+.vc-enter-actions { display: flex; align-items: center; gap: 16px; margin-top: 16px; flex-wrap: wrap; }
+.vc-enter-actions .button { width: auto; margin-top: 0; }
 
 /* --- demo badge on the title --- */
 .vc-badge {

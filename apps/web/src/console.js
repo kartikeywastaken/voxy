@@ -8,6 +8,18 @@ const majorityOf = (n) => (n <= 0 ? 1 : Math.floor(n / 2) + 1);
 const isPlaceholder = (a) => /^0x([0-9a-f])\1{39}$/i.test((a || "").trim());
 const isZero = (a) => /^0x0+$/.test((a || "").trim());
 
+// Connect an injected wallet (MetaMask etc.) and return the selected address. No deps — raw EIP-1193.
+async function connectWallet() {
+  const eth = window.ethereum;
+  if (!eth?.request) {
+    throw new Error("No browser wallet found. Install MetaMask (or another EIP-1193 wallet) to connect.");
+  }
+  const accounts = await eth.request({ method: "eth_requestAccounts" });
+  const addr = accounts?.[0];
+  if (!addr) throw new Error("No account was selected.");
+  return addr;
+}
+
 const ext = (href) =>
   href
     ? `<a class="vc-ext" href="${href}" target="_blank" rel="noopener" aria-label="View on explorer">↗</a>`
@@ -54,17 +66,24 @@ export function mountConsole(container, mode) {
       </div>
       <form id="vc-enter" class="vc-enter" novalidate>
         <label for="vc-wallet">${mode === "recover" ? "Which wallet do you want to recover?" : "Which wallet do you want to protect?"}</label>
+        <button type="button" class="button" id="vc-connect">Connect wallet</button>
+        <div class="vc-or"><span>or enter an address</span></div>
         <div class="vc-walletbar-row">
           <input id="vc-wallet" placeholder="0x… address or name.eth" autocomplete="off" spellcheck="false" />
           <button class="button button-small" type="submit">Load</button>
         </div>
         <p id="vc-wallet-err" class="error" role="alert"></p>
-        <button type="button" class="button" id="vc-demo">Use the live demo wallet →</button>
-        <p class="vc-fine">Enter any wallet to read its live on-chain state. This testnet demo signs guardian &amp; recovery actions for the demo wallet, whose keys the server holds.</p>
+        <button type="button" class="text-button" id="vc-demo">Use the live demo wallet →</button>
+        <p class="vc-fine">Connect your wallet or enter any address to read its live on-chain state. This testnet demo signs guardian &amp; recovery actions for the demo wallet, whose keys the server holds.</p>
       </form>
       <div class="vc-foot">
         <span class="vc-dim">Live reads · Sepolia + alt-mempool devnet</span>
       </div>`;
+    const go = (wallet) => {
+      view.wallet = wallet;
+      view.loaded = true;
+      load();
+    };
     container.querySelector("#vc-enter").addEventListener("submit", (e) => {
       e.preventDefault();
       const v = container.querySelector("#vc-wallet").value.trim();
@@ -73,15 +92,22 @@ export function mountConsole(container, mode) {
         err.textContent = "Enter a 0x… address or a name.eth.";
         return;
       }
-      view.wallet = v;
-      view.loaded = true;
-      load();
+      go(v);
     });
-    container.querySelector("#vc-demo").addEventListener("click", () => {
-      view.wallet = undefined;
-      view.loaded = true;
-      load();
+    container.querySelector("#vc-connect").addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      const err = container.querySelector("#vc-wallet-err");
+      btn.disabled = true;
+      btn.textContent = "Connecting…";
+      try {
+        go(await connectWallet());
+      } catch (ce) {
+        btn.disabled = false;
+        btn.textContent = "Connect wallet";
+        err.textContent = ce.message;
+      }
     });
+    container.querySelector("#vc-demo").addEventListener("click", () => go(undefined));
   }
 
   /* -------------------------------------------------------------- loader */
@@ -128,7 +154,10 @@ export function mountConsole(container, mode) {
         <div class="vc-note vc-warn"><b>${short(s.wallet)}</b> is a regular Ethereum account (EOA), not a Voxy-managed wallet on the alt-mempool devnet — so there is no recovery state to show here.
           <p class="vc-fine">This testnet demo reads and runs live recovery for Voxy wallets. Protecting your own MetaMask wallet would set up a Voxy recovery for it — a deployed smart-account, or an EIP-7702 delegation of your EOA — which isn't wired for arbitrary wallets in this demo.</p>
         </div>
-        <button class="button" id="vc-usedemo">Use the live demo wallet →</button>
+        <div class="vc-enter-actions">
+          <button class="button" id="vc-connect">Connect a different wallet</button>
+          <button class="text-button" id="vc-usedemo">Use the live demo wallet →</button>
+        </div>
       </div>
       <div class="vc-foot">
         <span class="vc-dim">Live reads · Sepolia + alt-mempool devnet</span>
@@ -143,6 +172,19 @@ export function mountConsole(container, mode) {
       }
       view.wallet = v && v.toLowerCase() !== s.demoWallet.toLowerCase() ? v : undefined;
       load();
+    });
+    container.querySelector("#vc-connect")?.addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      btn.textContent = "Connecting…";
+      try {
+        view.wallet = await connectWallet();
+        load();
+      } catch (ce) {
+        btn.disabled = false;
+        btn.textContent = "Connect a different wallet";
+        container.querySelector("#vc-wallet-err").textContent = ce.message;
+      }
     });
     container.querySelector("#vc-usedemo")?.addEventListener("click", () => {
       view.wallet = undefined;
