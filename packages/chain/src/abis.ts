@@ -254,3 +254,72 @@ export const rosterPublisherAbi = [
     ],
   },
 ] as const;
+
+/**
+ * The live ENSv2 per-user UserRegistry (PermissionedRegistry) that holds the guardian slots
+ * g1/g2/g3 as subnames. Only the functions Voxy drives: register a slot to a guardian, remove a
+ * slot (unregister), and read a slot's current owner/tokenId. `register` reverts on a live label,
+ * so replacing a guardian is unregister(findTokenId) then register(label, newOwner, ...).
+ */
+export const userRegistryAbi = [
+  {
+    type: "function",
+    name: "register",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "label", type: "string" },
+      { name: "owner", type: "address" },
+      { name: "registry", type: "address" },
+      { name: "resolver", type: "address" },
+      { name: "roleBitmap", type: "uint256" },
+      { name: "expiry", type: "uint64" },
+    ],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "unregister",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "anyId", type: "uint256" }],
+    outputs: [],
+  },
+  {
+    type: "function",
+    name: "findTokenId",
+    stateMutability: "view",
+    inputs: [{ name: "label", type: "string" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "findOwner",
+    stateMutability: "view",
+    inputs: [{ name: "label", type: "string" }],
+    outputs: [{ name: "", type: "address" }],
+  },
+] as const;
+
+/** VoxyThresholdResolver — holds the recovery policy (threshold) as an owner-writable text record. */
+export const thresholdResolverAbi = [
+  {
+    type: "function",
+    name: "setText",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "node", type: "bytes32" },
+      { name: "key", type: "string" },
+      { name: "value", type: "string" },
+    ],
+    outputs: [],
+  },
+  {
+    type: "function",
+    name: "text",
+    stateMutability: "view",
+    inputs: [
+      { name: "node", type: "bytes32" },
+      { name: "key", type: "string" },
+    ],
+    outputs: [{ name: "", type: "string" }],
+  },
+] as const;

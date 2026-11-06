@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { isAddress, zeroAddress } from "viem";
 import { executeRecovery, startRecovery } from "./actions.js";
+import { guardianConfig, setGuardians } from "./guardians.js";
 import { walletState } from "./state.js";
 
 // Cloud hosts (Render/Railway/Fly) inject PORT and need 0.0.0.0; locally we stay on loopback.
@@ -57,11 +58,26 @@ const server = createServer(async (req, res) => {
     const route = `${req.method} ${url.pathname}`;
 
     if (route === "GET /api/health") return send(res, 200, { ok: true });
-    if (route === "GET /api/state") return send(res, 200, await walletState());
+    if (route === "GET /api/state") {
+      const w = url.searchParams.get("wallet")?.trim();
+      if (w && !isAddress(w)) return send(res, 400, { error: "wallet must be an address" });
+      return send(res, 200, await walletState(w ? (w as `0x${string}`) : undefined));
+    }
+    if (route === "GET /api/guardians") return send(res, 200, await guardianConfig());
 
     // --- state-changing routes (spend funds / sign) require auth when a token is configured ---
-    if (route.startsWith("POST /api/recover/")) {
+    if (route.startsWith("POST /api/recover/") || route.startsWith("POST /api/guardians/")) {
       if (!authorized(req)) return send(res, 401, { error: "unauthorized" });
+    }
+
+    if (route === "POST /api/guardians/set") {
+      const body = await readJson(req);
+      const guardians = body.guardians;
+      if (!Array.isArray(guardians) || guardians.length !== 3) {
+        return send(res, 400, { error: "guardians must be an array of 3 entries" });
+      }
+      const threshold = body.threshold === undefined ? undefined : Number(body.threshold);
+      return send(res, 200, await setGuardians({ guardians: guardians.map(String), threshold }));
     }
 
     if (route === "POST /api/recover/start") {

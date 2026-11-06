@@ -200,3 +200,105 @@
 .vc-surface-name { font-size: 14px; font-weight: 500; letter-spacing: -0.01em; }
 .vc-surface-addr { display: flex; align-items: center; gap: 6px; margin-top: 7px; }
 .vc-surface .vc-fine { margin-top: 6px; }
+
+/* --- tabbed console: a compact instrument, one panel at a time --- */
+dialog.vc-dialog {
+  width: min(640px, calc(100% - 28px));
+  padding: 34px 38px 30px;
+}
+.vc-head { position: relative; }
+.vc-title {
+  font-size: 27px;
+  line-height: 1.1;
+  margin: 10px 0 0;
+  letter-spacing: -0.03em;
+}
+.vc-tabs {
+  display: flex;
+  gap: 24px;
+  margin-top: 20px;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.vc-tab {
+  background: none;
+  border: 0;
+  padding: 10px 1px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  white-space: nowrap;
+  transition: color 0.18s ease-out;
+}
+.vc-tab:hover { color: var(--ink); }
+.vc-tab.active { color: var(--ink); border-bottom-color: var(--accent); }
+
+.vc-panel { margin-top: 20px; min-height: 164px; }
+.vc-panel .vc-seclabel:first-of-type { margin-top: 20px; }
+
+.vc-foot {
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.vc-switch { display: flex; gap: 8px; flex: 1; margin: 0; }
+.vc-switch input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--white);
+  color: var(--ink);
+  font-family: "DM Mono", monospace;
+  font-size: 12px;
+}
+.vc-switch input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+.vc-switch .text-button { white-space: nowrap; }
+.vc-livenote { font-size: 11px; color: var(--muted); margin: 10px 0 0; }
+
+/* --- guardian editor --- */
+.vc-gform { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+.vc-slot { display: flex; align-items: center; gap: 12px; }
+.vc-slot-tag {
+  font-family: "DM Mono", monospace;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  width: 44px;
+  flex-shrink: 0;
+}
+.vc-slot-input {
+  flex: 1;
+  min-width: 0;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--white);
+  color: var(--ink);
+  font-family: "DM Mono", monospace;
+  font-size: 13px;
+}
+.vc-slot-input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+select.vc-slot-input { cursor: pointer; }
+
+/* --- success note + tx list --- */
+.vc-ok-note {
+  background: oklch(94% 0.04 150 / 0.45);
+  border: 1px solid oklch(60% 0.14 150 / 0.4);
+}
+.vc-ok-note b { color: oklch(43% 0.1 150); }
+.vc-txlist { display: flex; flex-direction: column; gap: 5px; margin-top: 9px; }
+.vc-txlist a {
+  font-family: "DM Mono", monospace;
+  font-size: 12px;
+  color: var(--accent);
+  text-decoration: none;
+}
+.vc-txlist a:hover { text-decoration: underline; }
