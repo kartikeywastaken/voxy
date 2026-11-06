@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { isAddress, zeroAddress } from "viem";
 import { executeRecovery, startRecovery } from "./actions.js";
-import { guardianConfig, setGuardians } from "./guardians.js";
+import { guardianConfig, resolveGuardian, setGuardians } from "./guardians.js";
 import { walletState } from "./state.js";
 
 // Cloud hosts (Render/Railway/Fly) inject PORT and need 0.0.0.0; locally we stay on loopback.
@@ -59,9 +59,19 @@ const server = createServer(async (req, res) => {
 
     if (route === "GET /api/health") return send(res, 200, { ok: true });
     if (route === "GET /api/state") {
-      const w = url.searchParams.get("wallet")?.trim();
-      if (w && !isAddress(w)) return send(res, 400, { error: "wallet must be an address" });
-      return send(res, 200, await walletState(w ? (w as `0x${string}`) : undefined));
+      const raw = url.searchParams.get("wallet")?.trim();
+      let w: `0x${string}` | undefined;
+      if (raw) {
+        try {
+          // accept a 0x… address or a name.eth (resolved on Sepolia)
+          const resolved = isAddress(raw) ? raw : await resolveGuardian(raw);
+          if (!resolved) return send(res, 400, { error: "wallet is empty" });
+          w = resolved as `0x${string}`;
+        } catch (e) {
+          return send(res, 400, { error: e instanceof Error ? e.message : "bad wallet" });
+        }
+      }
+      return send(res, 200, await walletState(w));
     }
     if (route === "GET /api/guardians") return send(res, 200, await guardianConfig());
 

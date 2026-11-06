@@ -38,6 +38,7 @@ export async function walletState(wallet?: Address) {
 
   return {
     wallet: w,
+    demoWallet: d.devnet.VoxyWallet,
     chain: { devnet: d.devnet.chainId, sepolia: d.sepolia.chainId },
     explorer: { devnet: d.devnet.explorer, sepolia: d.sepolia.explorer },
     identity: {

@@ -302,3 +302,46 @@ select.vc-slot-input { cursor: pointer; }
   text-decoration: none;
 }
 .vc-txlist a:hover { text-decoration: underline; }
+
+/* --- first-class wallet input (which wallet to protect / recover) --- */
+.vc-head form.vc-walletbar { margin-top: 18px; }
+.vc-walletbar label {
+  font-family: "DM Mono", monospace;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  display: block;
+  margin-bottom: 8px;
+}
+.vc-walletbar-row { display: flex; gap: 8px; }
+.vc-walletbar-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--white);
+  color: var(--ink);
+  font-family: "DM Mono", monospace;
+  font-size: 13px;
+}
+.vc-walletbar-row input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+.vc-walletbar-row .button-small {
+  white-space: nowrap;
+  width: auto;
+  flex: 0 0 auto;
+  margin-top: 0;
+}
+.vc-walletnote { margin: 8px 0 0; }
+.vc-walletnote code { font-family: "DM Mono", monospace; color: var(--ink); }
+
+.vc-majority {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 8px 0 2px;
+  padding-left: 56px;
+  font-size: 13px;
+}
+.vc-majority b { font-family: "DM Mono", monospace; color: var(--accent); font-weight: 500; }

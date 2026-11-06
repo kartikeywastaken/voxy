@@ -3,6 +3,7 @@ import { api, short } from "./api.js";
 
 const isAddress = (v) => /^0x[0-9a-fA-F]{40}$/.test(v.trim());
 const isGuardianInput = (v) => isAddress(v) || /\.eth$/i.test(v.trim()) || v.trim() === "";
+const majorityOf = (n) => (n <= 0 ? 1 : Math.floor(n / 2) + 1);
 const ext = (href) =>
   href
     ? `<a class="vc-ext" href="${href}" target="_blank" rel="noopener" aria-label="View on explorer">↗</a>`
@@ -40,16 +41,15 @@ function panelGuardians(gcfg) {
       <span class="vc-slot-tag">${slot.label}</span>
       <input class="vc-slot-input" data-slot="${slot.label}" value="${slot.guardian && !/^0x0+$/.test(slot.guardian) ? slot.guardian : ""}" placeholder="0x… address or name.eth" autocomplete="off" spellcheck="false" />
     </div>`;
-  const opts = [1, 2, 3]
-    .map((n) => `<option value="${n}" ${n === gcfg.threshold ? "selected" : ""}>${n}-of-3</option>`)
-    .join("");
+  const filled = gcfg.slots.filter((s) => s.guardian && !/^0x0+$/.test(s.guardian)).length;
   return `
     <p class="vc-fine">Your guardians are ENS subnames. Enter a <b>0x… address</b> or a <b>name.eth</b> (resolved on Sepolia) for each slot. Saving writes real on-chain transactions and syncs the roster cross-chain.</p>
     <form id="vc-gform" class="vc-gform" novalidate>
       ${gcfg.slots.map(slotRow).join("")}
-      <div class="vc-slot">
-        <span class="vc-slot-tag">M/N</span>
-        <select class="vc-slot-input" id="vc-threshold">${opts}</select>
+      <div class="vc-majority">
+        <span>Approvals needed</span>
+        <b id="vc-maj">${majorityOf(filled)} of ${filled}</b>
+        <span class="vc-dim">majority of your guardians</span>
       </div>
       <p id="vc-gerr" class="error" role="alert"></p>
       <button class="button" type="submit">Save guardians</button>
@@ -125,8 +125,11 @@ export function mountConsole(container, mode) {
     try {
       [s, gcfg] = await Promise.all([api.state(view.wallet), api.guardians()]);
     } catch (err) {
-      container.innerHTML = `<span class="preview-label">VOXY / RECOVERY CONSOLE</span><div class="vc-note vc-warn">Backend unreachable: ${err.message}.<br>Start it with <code>pnpm --filter @voxy/api start</code>.</div><button class="text-button" id="vc-retry">↻ Retry</button>`;
-      container.querySelector("#vc-retry")?.addEventListener("click", load);
+      container.innerHTML = `<span class="preview-label">VOXY / RECOVERY CONSOLE</span><div class="vc-note vc-warn">Couldn't load that wallet: ${err.message}.<br>Check the address/name, or that the API is running (<code>pnpm --filter @voxy/api start</code>).</div><button class="text-button" id="vc-retry">↻ Back to demo wallet</button>`;
+      container.querySelector("#vc-retry")?.addEventListener("click", () => {
+        view.wallet = undefined;
+        load();
+      });
       return;
     }
     render(s, gcfg);
@@ -142,23 +145,33 @@ export function mountConsole(container, mode) {
             ? panelSurfaces(s)
             : panelOverview(s);
 
+    const viewingOther = s.wallet.toLowerCase() !== s.demoWallet?.toLowerCase();
     container.innerHTML = `
       <div class="vc-head">
         <span class="preview-label">VOXY / RECOVERY CONSOLE · LIVE</span>
-        <h2 class="vc-title">${mode === "recover" ? "Recover a wallet" : "Your wallet, protected"}</h2>
+        <h2 class="vc-title">${mode === "recover" ? "Recover a wallet" : "Protect a wallet"}</h2>
+        <form id="vc-switch" class="vc-walletbar">
+          <label for="vc-wallet">${mode === "recover" ? "Wallet to recover" : "Wallet to protect"}</label>
+          <div class="vc-walletbar-row">
+            <input id="vc-wallet" placeholder="0x… address or name.eth" value="${view.wallet ?? s.wallet}" autocomplete="off" spellcheck="false" />
+            <button class="button button-small" type="submit">Load</button>
+          </div>
+          <p id="vc-wallet-err" class="error" role="alert"></p>
+          <p class="vc-fine vc-walletnote">${
+            viewingOther
+              ? `Viewing <code>${short(s.wallet)}</code> read-only. Guardian & recovery actions on this testnet demo run against the wallet the server holds keys for.`
+              : "Any address works — no ENS required. Enter a name.eth and it is resolved on Sepolia."
+          }</p>
+        </form>
         <nav class="vc-tabs" role="tablist">
           ${TABS.map(([id, label]) => `<button class="vc-tab ${view.tab === id ? "active" : ""}" data-tab="${id}" role="tab" aria-selected="${view.tab === id}">${label}</button>`).join("")}
         </nav>
       </div>
       <div class="vc-panel">${panel}</div>
       <div class="vc-foot">
-        <form id="vc-switch" class="vc-switch">
-          <input id="vc-wallet" placeholder="View another wallet · 0x…" value="${view.wallet ?? ""}" autocomplete="off" spellcheck="false" />
-          <button class="text-button" type="submit">View ↗</button>
-        </form>
-        <button class="text-button" id="vc-refresh">↻ Refresh</button>
-      </div>
-      <p class="vc-livenote">Live reads · Sepolia + alt-mempool devnet · no mocks${view.wallet ? ` · viewing ${short(view.wallet)}` : ""}</p>`;
+        <button class="text-button" id="vc-refresh">↻ Refresh live state</button>
+        <span class="vc-dim">Live reads · Sepolia + alt-mempool devnet · no mocks</span>
+      </div>`;
 
     // tab switching
     container.querySelectorAll(".vc-tab").forEach((b) =>
@@ -171,7 +184,12 @@ export function mountConsole(container, mode) {
     container.querySelector("#vc-switch")?.addEventListener("submit", (e) => {
       e.preventDefault();
       const v = container.querySelector("#vc-wallet").value.trim();
-      view.wallet = v && isAddress(v) ? v : undefined;
+      const err = container.querySelector("#vc-wallet-err");
+      if (v && !isGuardianInput(v)) {
+        if (err) err.textContent = "Enter a 0x… address or a name.eth.";
+        return;
+      }
+      view.wallet = v && v.toLowerCase() !== s.demoWallet.toLowerCase() ? v : undefined;
       load();
     });
 
@@ -182,11 +200,22 @@ export function mountConsole(container, mode) {
   function wireActions(s, gcfg) {
     // --- guardians save ---
     const gform = container.querySelector("#vc-gform");
+    // Live-update the "approvals needed" readout to the majority of filled slots as the user types.
+    const recomputeMajority = () => {
+      const n = [...container.querySelectorAll(".vc-slot-input[data-slot]")].filter(
+        (i) => i.value.trim() !== "",
+      ).length;
+      const el = container.querySelector("#vc-maj");
+      if (el) el.textContent = `${majorityOf(n)} of ${n}`;
+    };
+    container
+      .querySelectorAll(".vc-slot-input[data-slot]")
+      .forEach((i) => i.addEventListener("input", recomputeMajority));
     gform?.addEventListener("submit", async (e) => {
       e.preventDefault();
       const inputs = [...container.querySelectorAll(".vc-slot-input[data-slot]")];
       const guardians = inputs.map((i) => i.value.trim());
-      const threshold = Number(container.querySelector("#vc-threshold").value);
+      const threshold = majorityOf(guardians.filter((g) => g !== "").length);
       const err = container.querySelector("#vc-gerr");
       if (!guardians.every(isGuardianInput)) {
         err.textContent = "Each slot must be a 0x… address, a name.eth, or empty.";

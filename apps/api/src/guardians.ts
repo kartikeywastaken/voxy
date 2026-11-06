@@ -105,7 +105,10 @@ export async function setGuardians(input: { guardians: string[]; threshold?: num
   const resolved = await Promise.all(input.guardians.map((g) => resolveGuardian(String(g ?? ""))));
   const nonEmpty = resolved.filter((a) => a).length;
   const current = await readSepoliaRoster(account);
-  const threshold = input.threshold ?? current.threshold;
+  // Default to a majority of the configured guardians (2-of-3, 3-of-5, …) so the user never has
+  // to pick a quorum; an explicit threshold still wins.
+  const majority = nonEmpty <= 0 ? 1 : Math.floor(nonEmpty / 2) + 1;
+  const threshold = input.threshold ?? majority;
   if (threshold < 1 || threshold > 3) throw new Error("threshold must be 1..3");
   if (threshold > nonEmpty) throw new Error(`threshold ${threshold} exceeds ${nonEmpty} guardians`);
 
