@@ -22,5 +22,22 @@ crash, retain the journal and reconcile the original transaction; never delete i
 Exclusive signer custody across devices remains an operator responsibility. No automatic resend
 or cross-device nonce coordination is implemented.
 
-The browser signing flow, signature-verified progress, watcher and assembler integration are
-pending Claude's contract handoff. The raw query CLI must not be presented as verified progress.
+`packages/arkiv/src/coordination.ts` publishes requests after live domain/epoch/roster checks,
+publishes guardian-owned approvals with the request's observed expiry, and calculates verified
+progress. It validates the complete signed message, entity metadata, current membership and
+distinct signers. The raw query CLI remains discovery data and must not be presented as quorum.
+
+`packages/arkiv/src/snapshot.ts` reads actual deployed source contracts before writing readonly
+observations, including the actual source block/hash. The successful live snapshot is a devnet
+registry observation with no claimed independent attester signatures.
+
+`pnpm watcher "$WALLET"` runs a fresh-state poll every five seconds. Its CLI writes alerts and
+health status as JSON; no external notifier is enabled. Only requests matching the signing data
+and current on-chain state are emitted. Coverage gaps remain visible; delivery/checkpoint races
+can cause duplicate alerts. A published request is not itself a completed on-chain recovery.
+
+CLI request, approve, progress and snapshot commands and optional guardian signer configuration
+are documented in [the handoff](../docs/CODEX_HANDOFF.md). Browser signing, web screens and frame
+assembly are subsequent work. Eight security/input tests pass, along with live persistence and
+one empty watcher refresh; positive alert delivery and full recovery through these writers have
+not yet been exercised.

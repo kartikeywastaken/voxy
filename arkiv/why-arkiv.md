@@ -9,5 +9,6 @@ ENS and the devnet registry remain roster authorities. Arkiv data is untrusted u
 contracts verify signatures, membership, epochs and deadlines. Guardians publish using their own
 wallets so the operator cannot edit their approval entities. Wallet keys stay outside entity data.
 
-Current evidence is live RPC access and an unfunded writer. Product recovery flows are not yet
-verified or claimed to work.
+Current evidence includes a funded probe write/readback, a real devnet roster observation persisted
+on Rabdi, and a successful live owner-watcher refresh. Request/approval writers and verified progress
+are implemented; the full product recovery flow through those writers is not yet verified.

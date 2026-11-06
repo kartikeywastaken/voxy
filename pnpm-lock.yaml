@@ -29,9 +29,27 @@ importers:
       '@arkiv-network/sdk':
         specifier: 1.0.1
         version: 1.0.1(typescript@5.9.3)(viem@2.57.16(typescript@5.9.3))
+      '@voxy/frame-sdk':
+        specifier: workspace:*
+        version: link:../frame-sdk
       viem:
         specifier: ^2.38.0
         version: 2.57.16(typescript@5.9.3)
+
+  packages/frame-sdk:
+    dependencies:
+      viem:
+        specifier: ^2.38.0
+        version: 2.57.16(typescript@5.9.3)
+
+  packages/watcher:
+    dependencies:
+      '@voxy/arkiv':
+        specifier: workspace:*
+        version: link:../arkiv
+      '@voxy/frame-sdk':
+        specifier: workspace:*
+        version: link:../frame-sdk
 
 packages:
 

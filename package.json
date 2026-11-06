@@ -15,6 +15,7 @@
     "arkiv:status": "node --env-file=.env --import tsx packages/arkiv/src/cli.ts status",
     "arkiv:first-write": "node --env-file=.env --import tsx packages/arkiv/src/cli.ts first-write",
     "arkiv:query": "node --env-file=.env --import tsx packages/arkiv/src/cli.ts query",
+    "watcher": "node --env-file=.env --import tsx packages/watcher/src/cli.ts",
     "bootstrap": "tsx scripts/bootstrap.ts",
     "demo": "tsx scripts/demo.ts",
     "attacks": "tsx scripts/attacks.ts",

@@ -23,8 +23,12 @@ pnpm --filter @voxy/arkiv query recovery-request --account "$WALLET"
 ```
 
 Configured Arkiv writer: `0x3915753836031a63B6462310f511B4F0E660Ff47`.
-At the recorded live check it had zero tGLM; the first write is pending funding.
-The probe is separate from recovery data and has a nominal ten-minute native lifetime.
+The funded writer completed a [real probe write/readback](https://rabdi.explorer.arkiv.network/tx/0xa2be2bef11ca1d5e286e193a9e2f281336d49efaee75c8cdc4fe3c11822a7c4e)
+and a [live devnet roster snapshot](https://rabdi.explorer.arkiv.network/tx/0xaa1549ce7ab45ec22f5e81ad8b691e753902cc62a5224001bf02dfc5e1d00d74).
+The probe was separate from recovery activity and has expired; retain its receipt and journal.
+Request/approval writers, signature-verified progress and the polling owner watcher are implemented.
+Positive recovery/alert delivery through the new writers remains unverified; web and frame submission
+are subsequent work. See [live evidence](artifacts/arkiv/coordination-evidence.json).
 Default maximum cost: 0.01 tGLM per write. See [Arkiv usage](arkiv/how-you-use-arkiv.md).
 
 ## Testnet funding

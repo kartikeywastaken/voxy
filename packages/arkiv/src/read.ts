@@ -1,6 +1,6 @@
 import { and, asc, eq, gt } from "@arkiv-network/sdk/query";
-import { addr, u64 } from "@arkiv-network/sdk/schema";
-import { getAddress, isHex } from "viem";
+import { addr, key, u64 } from "@arkiv-network/sdk/schema";
+import { getAddress, type Hex, isHex } from "viem";
 import { arkivClients } from "./client.js";
 import { GuardianApprovals, RecoveryRequests, RosterSnapshots } from "./schema.js";
 
@@ -10,6 +10,8 @@ export function bytes32(value: string): `0x${string}` {
 }
 
 const metadata = {
+  project: true,
+  type: true,
   $key: true,
   $owner: true,
   $creator: true,
@@ -43,7 +45,7 @@ export async function readRequests(account: string) {
     .fetch();
 }
 
-export async function readApprovals(requestId: string) {
+export async function readApprovals(requestId: string, after?: Hex) {
   const { reader } = arkivClients();
   return reader
     .select({ ...metadata, guardian: true, ens: true, requestId: true, deadline: true })
@@ -54,6 +56,7 @@ export async function readApprovals(requestId: string) {
         eq("type", "guardian-approval"),
         eq("requestId", bytes32(requestId)),
         gt("deadline", u64(BigInt(Math.floor(Date.now() / 1000)))),
+        ...(after ? [gt("$key", key(bytes32(after)))] : []),
       ),
     )
     .orderBy(asc("$key"))
