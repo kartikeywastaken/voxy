@@ -111,13 +111,8 @@ node --env-file=.env --import tsx packages/orchestrator/src/arkiv-loop.ts   # fu
 
 ## What this does not claim
 
-Voxy is experimental. It is not production-ready, a trustless cross-chain bridge, or the first
-social recovery/ENS guardian system. The planned roster sync trusts 2 of 3 attesters. Guardian
+Voxy is experimental. It is not production-ready, a trustless cross-chain bridge. The planned roster sync trusts 2 of 3 attesters. Guardian
 data on Arkiv is public, and expiry cannot retract copies. Testnets may reset. We do not claim
 the alt mempool is required, publish gas measurements, or claim a live app until verified.
 ENSignv2 is a design reference; no code was copied from it.
 
-## AI usage and licence
-
-Codex assists the coordination package, configuration and documentation; Claude develops the
-chain core separately. All claims require actual chain evidence. Project licence: MIT.
