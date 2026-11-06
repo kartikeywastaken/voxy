@@ -28,10 +28,13 @@
     "chainId": 1337,
     "rpc": "https://altmempoolgateway.forshtat.com/rpc",
     "explorer": "https://explorer.altmempool.wtf",
-    "RosterRegistry": "TODO (deploy when faucet funded)",
-    "VoxyWallet": "TODO",
+    "RosterRegistry": "0xEa974EfA1aE7D89f7624E144dA1a444C8250f31C",
+    "VoxyWallet": "0xb7d81A26FC1293f638B3CDEF650cb84f80e9807E",
     "stakingRegistry": "0xd51c04d7a0b01124e84de152f4e56d9eecb22d2f",
-    "entryPoint": "0x00000000000000000000000000000000000000aa"
+    "entryPoint": "0x00000000000000000000000000000000000000aa",
+    "RosterRegistry_tx": "0x0a13ae2b6990c1242d5777678ab7ef0c7d5faca0ceb164e5b596e2b0d4e1cb7b",
+    "VoxyWallet_tx": "0x1f246999b4cbd3695ce8fca28b39a2218c6583dd641e4093c29b76909389b1bd",
+    "note": "Deployed as ordinary contracts on the EIP-8141 devnet. Frame-native VERIFY entrypoint pending (needs staking predeploy + hegota-support)."
   },
   "arkiv": {
     "chainId": 7794095,

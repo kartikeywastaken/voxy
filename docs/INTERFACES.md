@@ -44,18 +44,36 @@ function isActiveGuardian(address wallet, address g) external view returns (bool
 event RosterUpdated(address indexed wallet, uint64 epoch, bytes32 hash);
 ```
 
-### VoxyWallet
+### VoxyWallet  (ACTUAL shipped ABI — reconciled 2026-11-06, replaces the earlier frame-only sketch)
 ```solidity
-function requestRecovery(address newKey, bytes32 requestId) external;   // via SENDER frame after VERIFY quorum
-function executeRecovery() external;                                    // after RECOVERY_DELAY
-function cancelRecovery() external;                                     // owner only
-function freeze() external;                                             // owner only
+struct RecoveryDigest {
+    uint256 chainId; address wallet; address newKey;
+    uint64 ownerEpoch; uint64 rosterEpoch; bytes32 rosterHash;
+    uint64 deadline; bytes32 requestId; bytes32 callHash;
+}
+// Guardians EIP-712-sign RecoveryDigest; the quorum + add-only install happen here.
+function requestRecovery(RecoveryDigest calldata d, bytes[] calldata guardianSigs) external;
+function executeRecovery() external;                 // after recoveryDelay; ADD-ONLY
+function cancelRecovery() external;                  // owner only
+function freeze() external;                          // owner only
+function unfreeze() external;                        // owner only
 function owners() external view returns (address[] memory);
+function ownerCount() external view returns (uint256);
+function isOwner(address) external view returns (bool);
+function ownerEpoch() external view returns (uint64);
 function pending() external view returns (address key, uint64 readyAt, bytes32 requestId);
+function usedRequestId(bytes32) external view returns (bool);
+function DOMAIN_SEPARATOR() external view returns (bytes32);
 event RecoveryRequested(address indexed wallet, address newKey, uint64 readyAt, bytes32 requestId);
 event RecoveryExecuted(address indexed wallet, address newKey);
 event RecoveryCancelled(address indexed wallet);
 ```
+> **Note for the TS frame-SDK (Codex):** today `requestRecovery` takes the guardian ECDSA sigs
+> directly and verifies quorum in execution — this is the live, tested path (anvil + devnet).
+> The EIP-8141 *frame-native* variant (a VERIFY frame that reads each guardian via `sigparam`,
+> no args) is additive and will be exposed separately; it will NOT change this ABI. Build against
+> the ABI above. Domain: EIP-712 name `Voxy`, version `1`, live chainId, verifyingContract = wallet.
+> Compiled ABI JSON: `contracts/devnet/out/VoxyWallet.sol/VoxyWallet.json`.
 
 ## 3. Sepolia contract (Claude)
 

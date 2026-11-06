@@ -74,13 +74,15 @@ contract RosterRegistry {
 
         _require2of3(_digest(a), sigs);
 
-        // Asymmetric timing: carryover guardians active immediately; new guardians delayed.
+        // Asymmetric timing: the initial guardian set (bootstrap) and carryover guardians are active
+        // immediately; guardians ADDED to an existing roster are delayed by addDelay (weakening).
+        bool bootstrap = (prev.epoch == 0);
         uint64[3] memory activeAt;
         for (uint256 i = 0; i < 3; i++) {
             address g = guardians[i];
             if (g == address(0)) {
                 activeAt[i] = 0;
-            } else if (_wasActiveGuardian(prev, g)) {
+            } else if (bootstrap || _wasActiveGuardian(prev, g)) {
                 activeAt[i] = uint64(block.timestamp);
             } else {
                 activeAt[i] = uint64(block.timestamp) + addDelay;
