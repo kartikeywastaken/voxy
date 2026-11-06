@@ -12,7 +12,17 @@
       "UserRegistryImpl": "0x840fa461059862ea466a711e8c98c8de732061c0",
       "PermissionedResolverImpl": "0x7e4b2d59938930168024201752ee5503df402303",
       "UniversalResolverV2": "0x85edf8b6b7d4211e2b07aa687506b746357b92cf"
-    }
+    },
+    "UserRegistry": "0x7b9891558C32f5052D108f8AFA55d2F2BA99D129",
+    "ThresholdResolver": "0xA8572C9eF0E0A8aEA08E8531BdcFe6a7ef9aCdf6",
+    "rosterAccount": "0x59d4fadD32e071Ebde3d43d02B19aDbDA1a1dCeE",
+    "guardians": [
+      "0x6d3E1f382A6A059904F9a608eE53efA891a77aC8",
+      "0xc24D0902DBF77CE2111c7128925E9276aB77424A",
+      "0x7017ff35EC300e336D3fB5FFBC9A5a80A81a7C71"
+    ],
+    "rosterThreshold": 2,
+    "rpc": "https://ethereum-sepolia.publicnode.com"
   },
   "devnet": {
     "chainId": 1337,
