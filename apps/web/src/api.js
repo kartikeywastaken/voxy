@@ -29,6 +29,8 @@ export const api = {
     call("/api/recover/start", { method: "POST", body: JSON.stringify({ newKey }) }),
   executeRecovery: () => call("/api/recover/execute", { method: "POST" }),
   cancelRecovery: () => call("/api/recover/cancel", { method: "POST" }),
+  createWallet: (owner) =>
+    call("/api/wallet/create", { method: "POST", body: JSON.stringify({ owner }) }),
 };
 
 export const short = (addr) => (addr ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : "—");

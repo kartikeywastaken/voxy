@@ -210,13 +210,15 @@ export function mountConsole(container, mode) {
       </div>
       <div class="vc-panel">
         <div class="vc-note vc-warn">${view.walletName ? `<span class="vc-connected">✓ Connected via ${view.walletName}</span>` : ""}<b>${short(s.wallet)}</b> is a regular Ethereum account (EOA), not a Voxy-managed wallet on the alt-mempool devnet — so there is no recovery state to show here.
-          <p class="vc-fine">Connecting shows your address, but Voxy can't enroll it from the browser: protecting an EOA needs a one-time EIP-7702 delegation <b>signed by the wallet itself</b>, and MetaMask doesn't let a site request a delegation to a third-party contract (a safety gate). The mechanism is proven on-chain — see the <b>Existing EOA · EIP-7702</b> surface — but browser enrollment needs a wallet that supports delegating to a chosen contract, or a key you control.</p>
+          <p class="vc-fine">Modifying your existing EOA needs a one-time EIP-7702 delegation <b>signed by your wallet</b>, and MetaMask/Rainbow don't let a site request that (a safety gate). <b>But you can get a Voxy-protected wallet right now:</b> deploy a Voxy smart-account <b>owned by this address</b>, with guardians, that you can recover. Your EOA stays untouched.</p>
         </div>
         <div class="vc-enter-actions">
-          <button class="button" id="vc-connect">Connect a different wallet</button>
-          <button class="text-button" id="vc-usedemo">Use the live demo wallet →</button>
+          <button class="button" id="vc-create">Create my Voxy wallet →</button>
+          <button class="text-button" id="vc-connect">Connect a different wallet</button>
+          <button class="text-button" id="vc-usedemo">Use the demo wallet →</button>
         </div>
         <div id="vc-wallets2" class="vc-wallets"></div>
+        <div id="vc-createresult"></div>
       </div>
       <div class="vc-foot">
         <span class="vc-dim">Live reads · Sepolia + alt-mempool devnet</span>
@@ -246,6 +248,24 @@ export function mountConsole(container, mode) {
     container.querySelector("#vc-usedemo")?.addEventListener("click", () => {
       view.wallet = undefined;
       load();
+    });
+    container.querySelector("#vc-create")?.addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      btn.textContent = "Deploying… (~30–60s)";
+      const result = container.querySelector("#vc-createresult");
+      result.innerHTML = `<div class="vc-note"><span class="status-dot"></span> Deploying your Voxy smart-account on the devnet, wiring guardians, and syncing cross-chain…</div>`;
+      try {
+        const res = await api.createWallet(s.wallet);
+        view.wallet = res.wallet;
+        view.walletName = undefined;
+        view.draft = null;
+        load();
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = "Create my Voxy wallet →";
+        result.innerHTML = `<div class="vc-note vc-warn">${err.message}</div>`;
+      }
     });
   }
 

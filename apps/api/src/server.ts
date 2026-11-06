@@ -3,6 +3,7 @@ import { isAddress, zeroAddress } from "viem";
 import { cancelRecovery, executeRecovery, startRecovery } from "./actions.js";
 import { guardianConfig, resolveGuardian, setGuardians } from "./guardians.js";
 import { walletState } from "./state.js";
+import { createWallet } from "./wallet.js";
 
 // Cloud hosts (Render/Railway/Fly) inject PORT and need 0.0.0.0; locally we stay on loopback.
 const PORT = Number(process.env.PORT || process.env.VOXY_API_PORT || 8787);
@@ -76,8 +77,21 @@ const server = createServer(async (req, res) => {
     if (route === "GET /api/guardians") return send(res, 200, await guardianConfig());
 
     // --- state-changing routes (spend funds / sign) require auth when a token is configured ---
-    if (route.startsWith("POST /api/recover/") || route.startsWith("POST /api/guardians/")) {
+    if (
+      route.startsWith("POST /api/recover/") ||
+      route.startsWith("POST /api/guardians/") ||
+      route.startsWith("POST /api/wallet/")
+    ) {
       if (!authorized(req)) return send(res, 401, { error: "unauthorized" });
+    }
+
+    if (route === "POST /api/wallet/create") {
+      const body = await readJson(req);
+      const owner = body.owner;
+      if (typeof owner !== "string" || !isAddress(owner, { strict: false })) {
+        return send(res, 400, { error: "owner must be an address" });
+      }
+      return send(res, 200, await createWallet(owner));
     }
 
     if (route === "POST /api/guardians/set") {
