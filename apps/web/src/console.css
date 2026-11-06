@@ -373,6 +373,29 @@ select.vc-slot-input { cursor: pointer; }
 .vc-enter-actions { display: flex; align-items: center; gap: 16px; margin-top: 16px; flex-wrap: wrap; }
 .vc-enter-actions .button { width: auto; margin-top: 0; }
 
+/* --- wallet picker (EIP-6963) --- */
+.vc-wallets:empty { display: none; }
+.vc-wallets-list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.vc-wallet-pick {
+  text-align: left;
+  background: var(--white);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 11px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  transition: all 0.15s ease-out;
+}
+.vc-wallet-pick:hover { border-color: var(--accent); color: var(--accent); }
+.vc-connected {
+  display: block;
+  font-family: "DM Mono", monospace;
+  font-size: 11px;
+  color: oklch(43% 0.1 150);
+  margin-bottom: 6px;
+}
+
 /* --- demo badge on the title --- */
 .vc-badge {
   font-family: "DM Mono", monospace;

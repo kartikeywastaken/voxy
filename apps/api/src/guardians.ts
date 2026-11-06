@@ -38,7 +38,8 @@ const admin = () => privateKeyToAccount(pk("SEPOLIA_DEPLOYER_PK"));
 export async function resolveGuardian(value: string): Promise<Address | null> {
   const v = value.trim();
   if (!v) return null;
-  if (isAddress(v)) return getAddress(v);
+  // strict:false so a lowercase / non-checksummed address is still accepted; getAddress checksums it.
+  if (isAddress(v, { strict: false })) return getAddress(v);
   if (v.toLowerCase().endsWith(".eth")) {
     const ens = createPublicClient({
       chain: canonicalSepolia,

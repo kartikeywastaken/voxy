@@ -8,15 +8,33 @@ const majorityOf = (n) => (n <= 0 ? 1 : Math.floor(n / 2) + 1);
 const isPlaceholder = (a) => /^0x([0-9a-f])\1{39}$/i.test((a || "").trim());
 const isZero = (a) => /^0x0+$/.test((a || "").trim());
 
-// Connect an injected wallet (MetaMask etc.) and return the selected address. No deps — raw EIP-1193.
-async function connectWallet() {
-  const eth = window.ethereum;
-  if (!eth?.request) {
-    throw new Error("No browser wallet found. Install MetaMask (or another EIP-1193 wallet) to connect.");
-  }
-  const accounts = await eth.request({ method: "eth_requestAccounts" });
+// Discover injected wallets via EIP-6963 (Rainbow, MetaMask, Rabby, …). Falls back to legacy
+// window.ethereum. Returns [{ info:{name,…}, provider }]. No deps — raw browser events.
+function discoverWallets(timeout = 300) {
+  return new Promise((resolve) => {
+    const map = new Map();
+    const onAnnounce = (e) => {
+      const d = e.detail;
+      if (d?.info?.uuid) map.set(d.info.uuid, d);
+    };
+    window.addEventListener("eip6963:announceProvider", onAnnounce);
+    window.dispatchEvent(new Event("eip6963:requestProvider"));
+    setTimeout(() => {
+      window.removeEventListener("eip6963:announceProvider", onAnnounce);
+      let list = [...map.values()];
+      if (!list.length && window.ethereum?.request) {
+        const w = window.ethereum;
+        const name = w.isRainbow ? "Rainbow" : w.isMetaMask ? "MetaMask" : "Injected wallet";
+        list = [{ info: { name, uuid: "legacy" }, provider: w }];
+      }
+      resolve(list);
+    }, timeout);
+  });
+}
+async function requestAccount(provider) {
+  const accounts = await provider.request({ method: "eth_requestAccounts" });
   const addr = accounts?.[0];
-  if (!addr) throw new Error("No account was selected.");
+  if (!addr) throw new Error("No account was selected in your wallet.");
   return addr;
 }
 
@@ -44,6 +62,7 @@ export function mountConsole(container, mode) {
   const view = {
     tab: mode === "recover" ? "recover" : "overview",
     wallet: undefined,
+    walletName: undefined,
     loaded: false,
     draft: null,
   };
@@ -56,6 +75,49 @@ export function mountConsole(container, mode) {
     return live.length ? live : [""];
   };
 
+  // Connect flow shared by the entry gate and the EOA screen: discover wallets, connect one
+  // (or show a picker when several are installed), then hand back the address.
+  async function doConnect(btn, errEl, pickerEl, onAddr) {
+    const label = btn.textContent;
+    const reset = () => {
+      btn.disabled = false;
+      btn.textContent = label;
+    };
+    btn.disabled = true;
+    btn.textContent = "Connecting…";
+    if (errEl) errEl.textContent = "";
+    if (pickerEl) pickerEl.innerHTML = "";
+    const wallets = await discoverWallets().catch(() => []);
+    if (!wallets.length) {
+      if (errEl) errEl.textContent = "No browser wallet found. Install Rainbow, MetaMask, or another wallet.";
+      reset();
+      return;
+    }
+    const connect = async (w) => {
+      try {
+        const addr = await requestAccount(w.provider);
+        view.walletName = w.info.name;
+        onAddr(addr);
+      } catch (e) {
+        if (errEl) errEl.textContent = e.message;
+        reset();
+      }
+    };
+    if (wallets.length === 1) {
+      await connect(wallets[0]);
+      return;
+    }
+    reset();
+    if (pickerEl) {
+      pickerEl.innerHTML = `<p class="vc-fine">Choose a wallet:</p><div class="vc-wallets-list">${wallets
+        .map((w, i) => `<button type="button" class="vc-wallet-pick" data-i="${i}">${w.info.name}</button>`)
+        .join("")}</div>`;
+      pickerEl
+        .querySelectorAll(".vc-wallet-pick")
+        .forEach((b) => b.addEventListener("click", () => connect(wallets[Number(b.dataset.i)])));
+    }
+  }
+
   /* ---------------------------------------------------------- entry gate */
   function renderEntry() {
     clearTimer();
@@ -67,6 +129,7 @@ export function mountConsole(container, mode) {
       <form id="vc-enter" class="vc-enter" novalidate>
         <label for="vc-wallet">${mode === "recover" ? "Which wallet do you want to recover?" : "Which wallet do you want to protect?"}</label>
         <button type="button" class="button" id="vc-connect">Connect wallet</button>
+        <div id="vc-wallets" class="vc-wallets"></div>
         <div class="vc-or"><span>or enter an address</span></div>
         <div class="vc-walletbar-row">
           <input id="vc-wallet" placeholder="0x… address or name.eth" autocomplete="off" spellcheck="false" />
@@ -94,19 +157,14 @@ export function mountConsole(container, mode) {
       }
       go(v);
     });
-    container.querySelector("#vc-connect").addEventListener("click", async (e) => {
-      const btn = e.currentTarget;
-      const err = container.querySelector("#vc-wallet-err");
-      btn.disabled = true;
-      btn.textContent = "Connecting…";
-      try {
-        go(await connectWallet());
-      } catch (ce) {
-        btn.disabled = false;
-        btn.textContent = "Connect wallet";
-        err.textContent = ce.message;
-      }
-    });
+    container.querySelector("#vc-connect").addEventListener("click", (e) =>
+      doConnect(
+        e.currentTarget,
+        container.querySelector("#vc-wallet-err"),
+        container.querySelector("#vc-wallets"),
+        (addr) => go(addr),
+      ),
+    );
     container.querySelector("#vc-demo").addEventListener("click", () => go(undefined));
   }
 
@@ -151,13 +209,14 @@ export function mountConsole(container, mode) {
         </form>
       </div>
       <div class="vc-panel">
-        <div class="vc-note vc-warn"><b>${short(s.wallet)}</b> is a regular Ethereum account (EOA), not a Voxy-managed wallet on the alt-mempool devnet — so there is no recovery state to show here.
-          <p class="vc-fine">This testnet demo reads and runs live recovery for Voxy wallets. Protecting your own MetaMask wallet would set up a Voxy recovery for it — a deployed smart-account, or an EIP-7702 delegation of your EOA — which isn't wired for arbitrary wallets in this demo.</p>
+        <div class="vc-note vc-warn">${view.walletName ? `<span class="vc-connected">✓ Connected via ${view.walletName}</span>` : ""}<b>${short(s.wallet)}</b> is a regular Ethereum account (EOA), not a Voxy-managed wallet on the alt-mempool devnet — so there is no recovery state to show here.
+          <p class="vc-fine">Connecting shows your address, but Voxy can't enroll it from the browser: protecting an EOA needs a one-time EIP-7702 delegation <b>signed by the wallet itself</b>, and MetaMask doesn't let a site request a delegation to a third-party contract (a safety gate). The mechanism is proven on-chain — see the <b>Existing EOA · EIP-7702</b> surface — but browser enrollment needs a wallet that supports delegating to a chosen contract, or a key you control.</p>
         </div>
         <div class="vc-enter-actions">
           <button class="button" id="vc-connect">Connect a different wallet</button>
           <button class="text-button" id="vc-usedemo">Use the live demo wallet →</button>
         </div>
+        <div id="vc-wallets2" class="vc-wallets"></div>
       </div>
       <div class="vc-foot">
         <span class="vc-dim">Live reads · Sepolia + alt-mempool devnet</span>
@@ -173,19 +232,17 @@ export function mountConsole(container, mode) {
       view.wallet = v && v.toLowerCase() !== s.demoWallet.toLowerCase() ? v : undefined;
       load();
     });
-    container.querySelector("#vc-connect")?.addEventListener("click", async (e) => {
-      const btn = e.currentTarget;
-      btn.disabled = true;
-      btn.textContent = "Connecting…";
-      try {
-        view.wallet = await connectWallet();
-        load();
-      } catch (ce) {
-        btn.disabled = false;
-        btn.textContent = "Connect a different wallet";
-        container.querySelector("#vc-wallet-err").textContent = ce.message;
-      }
-    });
+    container.querySelector("#vc-connect")?.addEventListener("click", (e) =>
+      doConnect(
+        e.currentTarget,
+        container.querySelector("#vc-wallet-err"),
+        container.querySelector("#vc-wallets2"),
+        (addr) => {
+          view.wallet = addr;
+          load();
+        },
+      ),
+    );
     container.querySelector("#vc-usedemo")?.addEventListener("click", () => {
       view.wallet = undefined;
       load();

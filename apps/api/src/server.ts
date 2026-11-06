@@ -63,8 +63,8 @@ const server = createServer(async (req, res) => {
       let w: `0x${string}` | undefined;
       if (raw) {
         try {
-          // accept a 0x… address or a name.eth (resolved on Sepolia)
-          const resolved = isAddress(raw) ? raw : await resolveGuardian(raw);
+          // accept a 0x… address (any case) or a name.eth (resolved on Sepolia)
+          const resolved = await resolveGuardian(raw);
           if (!resolved) return send(res, 400, { error: "wallet is empty" });
           w = resolved as `0x${string}`;
         } catch (e) {
@@ -93,7 +93,7 @@ const server = createServer(async (req, res) => {
     if (route === "POST /api/recover/start") {
       const body = await readJson(req);
       const newKey = body.newKey;
-      if (typeof newKey !== "string" || !isAddress(newKey)) {
+      if (typeof newKey !== "string" || !isAddress(newKey, { strict: false })) {
         return send(res, 400, { error: "newKey must be an address" });
       }
       if (newKey.toLowerCase() === zeroAddress) {
