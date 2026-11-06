@@ -13,11 +13,11 @@ Voxy has **two pieces** to host:
 
 ### 1. API on Render (free)
 A blueprint is committed at `render.yaml`.
-- Push the repo to GitHub, then on Render: **New → Blueprint → pick the repo.** It builds `apps/api/Dockerfile`.
+- Push the repo to GitHub, then on Render: **New → Blueprint → pick the repo.** It builds the root `Dockerfile` (context = repo root, so the pnpm workspace resolves).
 - Set the secret env vars (the `sync: false` ones) in the Render dashboard — copy them from your local `.env` (see `apps/api/.env.example`): the two RPC URLs, `ARKIV_ACCESS_KEY`, `ARKIV_WRITER_PK`, `DEVNET_DEPLOYER_PK`, `GUARDIAN_1..3_PK`, `ATTESTER_1..2_PK`, and optionally `VOXY_API_TOKEN`.
 - After deploy, note the URL, e.g. `https://voxy-api.onrender.com`. Check `…/api/health` returns `{"ok":true}`.
 
-(Railway/Fly work the same way from `apps/api/Dockerfile`; set `HOST=0.0.0.0`, they inject `PORT`.)
+(Railway/Fly work the same way from the root `Dockerfile`; set `HOST=0.0.0.0`, they inject `PORT`.)
 
 ### 2. Frontend on Vercel or Netlify (free)
 Configs are committed (`vercel.json`, `netlify.toml`).
