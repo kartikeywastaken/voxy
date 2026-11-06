@@ -20,10 +20,10 @@ async function call(path, options) {
 export const api = {
   state: (wallet) => call(wallet ? `/api/state?wallet=${wallet}` : "/api/state"),
   guardians: () => call("/api/guardians"),
-  setGuardians: (guardians, threshold) =>
+  setGuardians: (guardians, threshold, wallet) =>
     call("/api/guardians/set", {
       method: "POST",
-      body: JSON.stringify({ guardians, threshold }),
+      body: JSON.stringify({ guardians, threshold, wallet }),
     }),
   startRecovery: (newKey) =>
     call("/api/recover/start", { method: "POST", body: JSON.stringify({ newKey }) }),

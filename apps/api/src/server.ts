@@ -101,7 +101,8 @@ const server = createServer(async (req, res) => {
         return send(res, 400, { error: "guardians must be an array of 3 entries" });
       }
       const threshold = body.threshold === undefined ? undefined : Number(body.threshold);
-      return send(res, 200, await setGuardians({ guardians: guardians.map(String), threshold }));
+      const wallet = typeof body.wallet === "string" ? body.wallet : undefined;
+      return send(res, 200, await setGuardians({ guardians: guardians.map(String), threshold, wallet }));
     }
 
     if (route === "POST /api/recover/start") {

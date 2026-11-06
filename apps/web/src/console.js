@@ -210,10 +210,10 @@ export function mountConsole(container, mode) {
       </div>
       <div class="vc-panel">
         <div class="vc-note vc-warn">${view.walletName ? `<span class="vc-connected">✓ Connected via ${view.walletName}</span>` : ""}<b>${short(s.wallet)}</b> is a regular Ethereum account (EOA), not a Voxy-managed wallet on the alt-mempool devnet — so there is no recovery state to show here.
-          <p class="vc-fine">Modifying your existing EOA needs a one-time EIP-7702 delegation <b>signed by your wallet</b>, and MetaMask/Rainbow don't let a site request that (a safety gate). <b>But you can get a Voxy-protected wallet right now:</b> deploy a Voxy smart-account <b>owned by this address</b>, with guardians, that you can recover. Your EOA stays untouched.</p>
+          <p class="vc-fine"><b>Voxy is a recovery layer, not a wallet.</b> It attaches to an account two ways: (1) delegating your existing EOA to it via EIP-7702 — but MetaMask/Rainbow won't let a site request that, and MetaMask's own 7702 upgrade points at <i>MetaMask's</i> contract, not Voxy's; or (2) a fresh account with Voxy recovery built in, owned by you. <b>Option 2 works right now — free. We sponsor all the gas; you don't need a devnet account.</b></p>
         </div>
         <div class="vc-enter-actions">
-          <button class="button" id="vc-create">Create my Voxy wallet →</button>
+          <button class="button" id="vc-create">Add Voxy recovery (new account) →</button>
           <button class="text-button" id="vc-connect">Connect a different wallet</button>
           <button class="text-button" id="vc-usedemo">Use the demo wallet →</button>
         </div>
@@ -263,7 +263,7 @@ export function mountConsole(container, mode) {
         load();
       } catch (err) {
         btn.disabled = false;
-        btn.textContent = "Create my Voxy wallet →";
+        btn.textContent = "Add Voxy recovery (new account) →";
         result.innerHTML = `<div class="vc-note vc-warn">${err.message}</div>`;
       }
     });
@@ -387,8 +387,8 @@ export function mountConsole(container, mode) {
           <p id="vc-wallet-err" class="error" role="alert"></p>
           <p class="vc-fine vc-walletnote">${
             demo
-              ? "Demo wallet — the server holds its keys, so guardian &amp; recovery actions run live here."
-              : `Viewing <code>${short(s.wallet)}</code> read-only. Guardian &amp; recovery actions run against the demo wallet.`
+              ? "Demo wallet — the server holds its keys, so every action here runs live."
+              : `A Voxy account owned by <code>${short(s.owners?.[0] || s.wallet)}</code>. Its guardians can recover it live; owner-only actions (cancel/freeze) need the owner to sign.`
           }</p>
         </form>
         <nav class="vc-tabs" role="tablist">
@@ -478,7 +478,7 @@ export function mountConsole(container, mode) {
       const result = container.querySelector("#vc-gresult");
       result.innerHTML = `<div class="vc-note"><span class="status-dot"></span> Registering guardians on Sepolia, then syncing to devnet…</div>`;
       try {
-        const res = await api.setGuardians(guardians, threshold);
+        const res = await api.setGuardians(guardians, threshold, S.wallet);
         if (res.changed === false) {
           result.innerHTML = `<div class="vc-note vc-warn">${res.message}</div>`;
         } else {

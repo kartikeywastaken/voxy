@@ -47,7 +47,9 @@ export async function resolveGuardian(value: string): Promise<Address | null> {
     });
     const addr = await ens.getEnsAddress({ name: normalize(v) });
     if (!addr || addr === zeroAddress) {
-      throw new Error(`ENS name "${v}" does not resolve to an address on Sepolia`);
+      throw new Error(
+        `ENS name "${v}" does not resolve on Sepolia. Only Sepolia-registered names work here — a mainnet name won't. Use a 0x… address instead.`,
+      );
     }
     return getAddress(addr);
   }
@@ -91,12 +93,22 @@ async function sendSepolia(
  * address, a name.eth, or "" to clear a slot). Only changed slots are written. Every step is a
  * real transaction: Sepolia (register/unregister/threshold/publish) then an attested devnet sync.
  */
-export async function setGuardians(input: { guardians: string[]; threshold?: number }) {
+export async function setGuardians(input: {
+  guardians: string[];
+  threshold?: number;
+  wallet?: string;
+}) {
   const d = loadDeployments();
   const registry = d.sepolia.UserRegistry as Address;
   const resolver = d.sepolia.ThresholdResolver as Address;
   const publisher = d.sepolia.RosterPublisher as Address;
   const account = d.sepolia.rosterAccount as Address;
+  // Publish + sync the wallet being viewed (a created wallet or the demo wallet), so its roster
+  // actually updates. The guardian subnames themselves are shared, read via `account`.
+  const syncWallet =
+    input.wallet && isAddress(input.wallet, { strict: false })
+      ? getAddress(input.wallet)
+      : undefined;
 
   if (!Array.isArray(input.guardians) || input.guardians.length !== 3) {
     throw new Error("guardians must be an array of 3 entries (address, name.eth, or \"\")");
@@ -173,16 +185,16 @@ export async function setGuardians(input: { guardians: string[]; threshold?: num
       address: publisher,
       abi: rosterPublisherAbi,
       functionName: "publish",
-      args: [account],
+      args: [syncWallet ?? account],
     });
   } catch {
     /* publish is advisory; a no-op/revert must not block the sync */
   }
 
   // 5. Attested cross-chain sync so the devnet recovery wallet sees the new roster.
-  const currentDevnet = await readDevnetRoster();
+  const currentDevnet = await readDevnetRoster(syncWallet);
   const epoch = currentDevnet.epoch + 1n;
-  const attestation = await buildAttestation(epoch);
+  const attestation = await buildAttestation(epoch, { account: syncWallet });
   const a1 = await signAttestation(pk("ATTESTER_1_PK"), attestation);
   const a2 = await signAttestation(pk("ATTESTER_2_PK"), attestation);
   const payer = privateKeyToAccount(pk("DEVNET_DEPLOYER_PK"));
