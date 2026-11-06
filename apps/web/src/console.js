@@ -1,6 +1,7 @@
 import "./console.css";
 import { api, short } from "./api.js";
 
+const escape = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const isAddress = (v) => /^0x[0-9a-fA-F]{40}$/.test(v.trim());
 const isGuardianInput = (v) => isAddress(v) || /\.eth$/i.test(v.trim()) || v.trim() === "";
 const majorityOf = (n) => (n <= 0 ? 1 : Math.floor(n / 2) + 1);
@@ -65,12 +66,16 @@ export function mountConsole(container, mode) {
     walletName: undefined,
     loaded: false,
     draft: null,
+    provider: null,
+    owner: null,
+    recovery: null,
   };
   let timer;
   let S;
   let G;
   const clearTimer = () => timer && clearInterval(timer);
   const draftFrom = (gcfg) => {
+    if (gcfg.sharedLegacy) return [""];
     const live = gcfg.slots.map((s) => s.guardian).filter((a) => a && !isZero(a));
     return live.length ? live : [""];
   };
@@ -97,7 +102,9 @@ export function mountConsole(container, mode) {
       try {
         const addr = await requestAccount(w.provider);
         view.walletName = w.info.name;
-        onAddr(addr);
+        view.provider = w.provider;
+        view.owner = addr;
+        await onAddr(addr);
       } catch (e) {
         if (errEl) errEl.textContent = e.message;
         reset();
@@ -110,11 +117,24 @@ export function mountConsole(container, mode) {
     reset();
     if (pickerEl) {
       pickerEl.innerHTML = `<p class="vc-fine">Choose a wallet:</p><div class="vc-wallets-list">${wallets
-        .map((w, i) => `<button type="button" class="vc-wallet-pick" data-i="${i}">${w.info.name}</button>`)
+        .map((w, i) => `<button type="button" class="vc-wallet-pick" data-i="${i}">${escape(w.info.name)}</button>`)
         .join("")}</div>`;
       pickerEl
         .querySelectorAll(".vc-wallet-pick")
         .forEach((b) => b.addEventListener("click", () => connect(wallets[Number(b.dataset.i)])));
+    }
+  }
+
+  async function switchToDevnet() {
+    const chain = S.ownerActions.chain;
+    const current = await view.provider.request({ method: "eth_chainId" });
+    if (current.toLowerCase() === chain.chainId.toLowerCase()) return;
+    try {
+      await view.provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: chain.chainId }] });
+    } catch (error) {
+      if (error.code !== 4902) throw error;
+      await view.provider.request({ method: "wallet_addEthereumChain", params: [chain] });
+      await view.provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: chain.chainId }] });
     }
   }
 
@@ -123,7 +143,7 @@ export function mountConsole(container, mode) {
     clearTimer();
     container.innerHTML = `
       <div class="vc-head">
-        <span class="preview-label">VOXY / RECOVERY CONSOLE · LIVE</span>
+        <span class="preview-label">Voxy recovery</span>
         <h2 class="vc-title">${mode === "recover" ? "Recover a wallet" : "Protect a wallet"}</h2>
       </div>
       <form id="vc-enter" class="vc-enter" novalidate>
@@ -173,9 +193,15 @@ export function mountConsole(container, mode) {
     clearTimer();
     container.innerHTML = `<span class="preview-label">VOXY / RECOVERY CONSOLE</span><div class="vc-loading"><span class="status-dot"></span> Reading live chain state…</div>`;
     try {
-      [S, G] = await Promise.all([api.state(view.wallet), api.guardians()]);
+      const previous = S?.wallet;
+      S = await api.state(view.wallet);
+      G = S.guardianConfig;
+      if (previous?.toLowerCase() !== S.wallet.toLowerCase()) { view.draft = null; view.recovery = null; }
+      const url = new URL(location.href);
+      url.searchParams.set("voxy", view.wallet ?? S.wallet);
+      history.replaceState(null, "", url);
     } catch (err) {
-      container.innerHTML = `<span class="preview-label">VOXY / RECOVERY CONSOLE</span><div class="vc-note vc-warn">Couldn't load that wallet: ${err.message}.</div><button class="text-button" id="vc-retry">← Choose another wallet</button>`;
+      container.innerHTML = `<span class="preview-label">VOXY / RECOVERY CONSOLE</span><div class="vc-note vc-warn">Couldn't load that wallet: ${escape(err.message)}.</div><button class="text-button" id="vc-retry">← Choose another wallet</button>`;
       container.querySelector("#vc-retry")?.addEventListener("click", () => {
         view.loaded = false;
         view.wallet = undefined;
@@ -183,7 +209,7 @@ export function mountConsole(container, mode) {
       });
       return;
     }
-    if (!view.draft) view.draft = draftFrom(G);
+    if (!view.draft) view.draft = G ? draftFrom(G) : [""];
     if (S.isVoxyWallet === false) {
       renderNotVoxy();
       return;
@@ -197,23 +223,27 @@ export function mountConsole(container, mode) {
     const s = S;
     container.innerHTML = `
       <div class="vc-head">
-        <span class="preview-label">VOXY / RECOVERY CONSOLE · LIVE</span>
+        <span class="preview-label">Voxy recovery</span>
         <h2 class="vc-title">${mode === "recover" ? "Recover a wallet" : "Protect a wallet"}</h2>
         <form id="vc-switch" class="vc-walletbar">
           <label for="vc-wallet">${mode === "recover" ? "Wallet to recover" : "Wallet to protect"}</label>
           <div class="vc-walletbar-row">
-            <input id="vc-wallet" value="${view.wallet ?? ""}" placeholder="0x… address or name.eth" autocomplete="off" spellcheck="false" />
+            <input id="vc-wallet" value="${escape(view.wallet ?? "")}" placeholder="0x… address or name.eth" autocomplete="off" spellcheck="false" />
             <button class="button button-small" type="submit">Load</button>
           </div>
           <p id="vc-wallet-err" class="error" role="alert"></p>
         </form>
       </div>
       <div class="vc-panel">
-        <div class="vc-note vc-warn">${view.walletName ? `<span class="vc-connected">✓ Connected via ${view.walletName}</span>` : ""}<b>${short(s.wallet)}</b> is a regular Ethereum account (EOA), not a Voxy-managed wallet on the alt-mempool devnet — so there is no recovery state to show here.
-          <p class="vc-fine"><b>Voxy is a recovery layer, not a wallet.</b> It attaches to an account two ways: (1) delegating your existing EOA to it via EIP-7702 — but MetaMask/Rainbow won't let a site request that, and MetaMask's own 7702 upgrade points at <i>MetaMask's</i> contract, not Voxy's; or (2) a fresh account with Voxy recovery built in, owned by you. <b>Option 2 works right now — free. We sponsor all the gas; you don't need a devnet account.</b></p>
-        </div>
+        <section class="vc-setup">
+          <span class="vc-connected">${view.walletName ? `Connected with ${escape(view.walletName)}` : "Account checked on-chain"}</span>
+          <h3>Add a recovery account</h3>
+          <p>No Voxy account was found for ${chip(s.wallet)}. Create one owned by this address, then choose the people who can help you recover it.</p>
+          <div class="vc-setup-details"><span>Gas sponsored</span><span>Your choice of guardians</span><span>Saved on-chain</span></div>
+          <p class="vc-fine">This creates a separate smart account. Recovery protects that account; assets in your existing wallet stay in your existing wallet.</p>
+        </section>
         <div class="vc-enter-actions">
-          <button class="button" id="vc-create">Add Voxy recovery (new account) →</button>
+          <button class="button" id="vc-create">Create recovery account</button>
           <button class="text-button" id="vc-connect">Connect a different wallet</button>
           <button class="text-button" id="vc-usedemo">Use the demo wallet →</button>
         </div>
@@ -252,19 +282,19 @@ export function mountConsole(container, mode) {
     container.querySelector("#vc-create")?.addEventListener("click", async (e) => {
       const btn = e.currentTarget;
       btn.disabled = true;
-      btn.textContent = "Deploying… (~30–60s)";
+      btn.textContent = "Creating account…";
       const result = container.querySelector("#vc-createresult");
-      result.innerHTML = `<div class="vc-note"><span class="status-dot"></span> Deploying your Voxy smart-account on the devnet, wiring guardians, and syncing cross-chain…</div>`;
+      result.innerHTML = `<div class="vc-note"><span class="status-dot"></span> Creating your account on-chain. Keep this window open; if it closes, reconnect to find your account.</div>`;
       try {
         const res = await api.createWallet(s.wallet);
         view.wallet = res.wallet;
-        view.walletName = undefined;
         view.draft = null;
+        view.tab = "guardians";
         load();
       } catch (err) {
         btn.disabled = false;
-        btn.textContent = "Add Voxy recovery (new account) →";
-        result.innerHTML = `<div class="vc-note vc-warn">${err.message}</div>`;
+        btn.textContent = "Create recovery account";
+        result.innerHTML = `<div class="vc-note vc-warn">${escape(err.message)}</div>`;
       }
     });
   }
@@ -273,21 +303,27 @@ export function mountConsole(container, mode) {
   function panelOverview() {
     const s = S;
     const g = s.roster.guardians.filter((a) => a && !isZero(a));
-    const match = s.roster.crossChainMatch;
+    const ready = g.length >= s.roster.threshold && s.roster.threshold > 0 && s.roster.crossChainMatch && !G?.sharedLegacy;
     return `
+      <section class="vc-summary">
+        <div><span class="vc-state ${s.frozen ? "vc-bad" : ready ? "vc-ok" : ""}">${s.frozen ? "Recovery frozen" : ready ? "Recovery enabled" : G?.sharedLegacy ? "Replace demo guardians" : "Choose your guardians"}</span>
+        <h3>${ready ? `${s.roster.threshold} approvals protect this account` : "One more step to protect your account"}</h3>
+        <p>${ready ? `A new owner can be added after a ${s.recoveryDelaySeconds}-second waiting period.` : "Add trusted people in Guardians. Your account is already saved on-chain."}</p></div>
+        <div class="vc-quorum"><strong>${g.length}</strong><span>guardians</span></div>
+      </section>
       <div class="vc-grid">
-        ${row("Wallet", `${chip(s.wallet)}${ext(`${s.explorer.devnet}/address/${s.wallet}`)}`)}
-        ${row("Owners", `${s.owners.map(ownerChip).join(" ")} <span class="vc-dim">(${s.ownerCount})</span>`)}
-        ${row("Owner epoch", s.ownerEpoch)}
-        ${row("Status", s.frozen ? "Frozen" : "Active", s.frozen ? "vc-bad" : "vc-ok")}
+        ${row("Recovery account", `${chip(s.wallet)}${ext(`${s.explorer.devnet}/address/${s.wallet}`)}`)}
+        ${row("Owner addresses", s.owners.map(ownerChip).join(" "))}
+        ${row("Recovery delay", `${s.recoveryDelaySeconds} seconds`)}
       </div>
-      <div class="vc-seclabel"><span class="vc-secn">↔</span>Cross-chain, one roster</div>
-      <div class="vc-grid">
-        ${row("Guardians", `${g.map((a) => chip(a)).join(" ")} <span class="vc-dim">· ${s.roster.threshold}-of-${g.length}</span>`)}
-        ${row("Sepolia ENS roster", `${chip(s.roster.sepoliaRosterHash)}${ext(s.identity && s.identity.explorer)}`)}
-        ${row("Devnet registry", chip(s.roster.rosterHash))}
-        ${row("Sync", match ? "✓ one identity, two chains" : "✗ mismatch", match ? "vc-ok" : "vc-bad")}
-      </div>`;
+      <section class="vc-roster-summary"><h3>${G?.sharedLegacy ? "Current demo guardian roster" : "Guardian roster"}</h3>
+        ${g.length ? `<div class="vc-guardian-list">${g.map((a, i) => `<div><span>Guardian ${i + 1}</span>${chip(a)}</div>`).join("")}</div>` : `<p class="vc-fine">No guardians configured. Add your own addresses or Sepolia ENS names.</p>`}
+        <details class="vc-chain-details"><summary>On-chain verification <span class="${s.roster.crossChainMatch ? "vc-ok" : ""}">${s.roster.crossChainMatch ? "In sync" : s.roster.configured ? "Sync needed" : "Awaiting setup"}</span></summary>
+          ${row("Sepolia roster hash", chip(s.roster.sepoliaRosterHash))}
+          ${row("Devnet roster hash", chip(s.roster.rosterHash))}
+          ${row("Roster version", s.roster.epoch)}
+        </details>
+      </section>`;
   }
 
   function panelGuardians() {
@@ -297,21 +333,23 @@ export function mountConsole(container, mode) {
       .map(
         (val, i) => `
       <div class="vc-slot">
-        <span class="vc-slot-tag">g${i + 1}</span>
-        <input class="vc-slot-input" data-gi="${i}" value="${val}" placeholder="0x… address or name.eth" autocomplete="off" spellcheck="false" />
+        <label class="vc-slot-tag" for="vc-guardian-${i}">Guardian ${i + 1}</label>
+        <input id="vc-guardian-${i}" class="vc-slot-input" data-gi="${i}" value="${escape(val)}" placeholder="0x… address or name.eth" autocomplete="off" spellcheck="false" />
         <button type="button" class="vc-slot-x" data-rm="${i}" aria-label="Remove guardian ${i + 1}" ${draft.length <= 1 ? "disabled" : ""}>×</button>
       </div>`,
       )
       .join("");
     return `
-      <p class="vc-fine">Enter a <b>0x… address</b> or a <b>name.eth</b> (resolved on Sepolia) for each guardian. Saving writes real on-chain transactions and syncs the roster cross-chain.</p>
+      <div class="vc-section-intro"><h3>People you trust</h3><p>Choose up to three guardians. They only need a wallet they control; a Voxy account is not required.</p></div>
+      ${G?.sharedLegacy ? '<p class="vc-note vc-warn">This account still uses the shared demo roster. Save your own guardians to give this account a separate roster.</p>' : ''}
+      <button class="text-button" id="vc-signconnect" type="button">${view.owner ? `Signing wallet: ${short(view.owner)} · Change` : "Connect the owner wallet to save changes"}</button><div id="vc-signwallets"></div>
       <form id="vc-gform" class="vc-gform" novalidate>
         ${rows}
         <button type="button" class="vc-addg" id="vc-addg" ${draft.length >= 3 ? "disabled" : ""}>+ Add guardian${draft.length >= 3 ? " · max 3" : ""}</button>
-        <div class="vc-majority"><span>Approvals needed</span><b id="vc-maj">${majorityOf(nonEmpty)} of ${nonEmpty}</b><span class="vc-dim">majority of your guardians</span></div>
+        <div class="vc-majority"><span>Approvals needed</span><b id="vc-maj">${nonEmpty ? `${majorityOf(nonEmpty)} of ${nonEmpty}` : "Not set"}</b><span class="vc-dim">majority of your guardians</span></div>
         <p id="vc-gerr" class="error" role="alert"></p>
         <button class="button" type="submit">Save guardians</button>
-        <p class="vc-fine">Up to 3 guardians (a fixed 3-slot roster). Each changed slot is a Sepolia register/unregister, then one attested devnet sync — about 30–60s.</p>
+        <p class="vc-fine">Use a wallet address or a name registered on Sepolia. The owner signs the change; Voxy sponsors the on-chain update.</p>
       </form>
       <div id="vc-gresult"></div>`;
   }
@@ -331,18 +369,36 @@ export function mountConsole(container, mode) {
           <div class="vc-row"><span class="vc-label">Time-lock</span><span class="vc-value" id="vc-countdown">${p.ready ? "Ready" : `${p.secondsRemaining}s remaining`}</span></div>
           <button class="button" id="vc-execute" ${p.ready ? "" : "disabled"}>Finalize recovery (add-only)</button>
           <button class="text-button vc-cancel" id="vc-cancel">Cancel this recovery</button>
+          <button class="text-button" id="vc-signconnect">Connect the owner wallet</button><div id="vc-signwallets"></div>
           <p class="vc-fine">Add-only: finalizing installs the new owner alongside the existing one. It can never remove owners or move funds. The owner can cancel any time before finalizing.</p>
         </div>`;
+    }
+    if (s.roster.threshold < 1) {
+      return `<div class="vc-section-intro"><h3>Set up guardians first</h3><p>This account is saved on-chain. Choose your guardians before you can start a recovery.</p><button class="button" id="vc-setup-guardians">Choose guardians</button></div>`;
     }
     const g = s.roster.guardians.filter((a) => a && !isZero(a));
     return `
       <form id="vc-start" class="vc-start" novalidate>
-        <label for="vc-newkey">Recover to a new owner key</label>
+        <h3>Add a replacement owner</h3>
+        <p class="vc-fine">The new address does not need a Voxy account. Your guardians approve it before the waiting period begins.</p>
+        <label for="vc-newkey">New owner address</label>
         <input id="vc-newkey" placeholder="0x… address of your new wallet" autocomplete="off" spellcheck="false" />
         <p id="vc-newkey-err" class="error" role="alert"></p>
-        <button class="button" type="submit">Start recovery with guardian quorum</button>
+        <button class="button" type="submit">${s.wallet.toLowerCase() === s.demoWallet.toLowerCase() ? "Start demo recovery" : "Create recovery request"}</button>
         <p class="vc-fine">A ${s.roster.threshold}-of-${g.length} guardian quorum signs the recovery digest. The new key becomes an additional owner after a ${s.recoveryDelaySeconds}s time-lock.</p>
-      </form>`;
+      </form>
+      ${s.wallet.toLowerCase() !== s.demoWallet.toLowerCase() ? `<div class="vc-recovery-approvals">
+        <label for="vc-request">Shared recovery request</label>
+        <textarea id="vc-request" rows="4" placeholder="Create a request above, or paste the JSON shared with your guardians.">${escape(view.recovery?.requestText ?? (view.recovery?.message ? JSON.stringify(view.recovery.message) : ""))}</textarea>
+        <p class="vc-fine">Copy this request to share it with every guardian. Keep a copy to resume after a refresh.</p>
+        <button class="text-button" id="vc-signconnect">Connect a guardian wallet</button><div id="vc-signwallets"></div>
+        <button class="button" id="vc-approve">Sign guardian approval</button>
+        <label for="vc-signatures">Guardian signatures (one per line)</label>
+        <textarea id="vc-signatures" rows="3" placeholder="0x…">${escape(view.recovery?.signaturesText ?? view.recovery?.signatures?.join("\n") ?? "")}</textarea>
+        <p class="vc-fine">Each guardian signs the same request and shares their signature here. Only distinct, active guardians count.</p>
+        <button class="button" id="vc-submit-approvals">Submit guardian approvals</button>
+        <p id="vc-approval-error" class="error" role="alert"></p>
+      </div>` : ""}`;
   }
 
   function panelSurfaces() {
@@ -358,7 +414,7 @@ export function mountConsole(container, mode) {
         </div>`,
       )
       .join("")}</div>
-      <p class="vc-fine">Same wallet, three ways to enforce the guardian roster: an ordinary transaction, an EIP-8141 VERIFY frame on the alt-mempool, and an existing EOA via EIP-7702. All live on testnets.</p>`;
+      <p class="vc-fine">These are the enforcement surfaces deployed for the selected account on testnets.</p>`;
   }
 
   /* --------------------------------------------------------- full render */
@@ -376,21 +432,22 @@ export function mountConsole(container, mode) {
 
     container.innerHTML = `
       <div class="vc-head">
-        <span class="preview-label">VOXY / RECOVERY CONSOLE · LIVE</span>
+        <span class="preview-label">Voxy recovery</span>
         <h2 class="vc-title">${mode === "recover" ? "Recover a wallet" : "Protect a wallet"}${demo ? ' <span class="vc-badge">demo</span>' : ""}</h2>
         <form id="vc-switch" class="vc-walletbar">
           <label for="vc-wallet">${mode === "recover" ? "Wallet to recover" : "Wallet to protect"}</label>
           <div class="vc-walletbar-row">
-            <input id="vc-wallet" value="${view.wallet ?? s.wallet}" autocomplete="off" spellcheck="false" />
+            <input id="vc-wallet" value="${escape(view.wallet ?? s.wallet)}" autocomplete="off" spellcheck="false" />
             <button class="button button-small" type="submit">Load</button>
           </div>
           <p id="vc-wallet-err" class="error" role="alert"></p>
           <p class="vc-fine vc-walletnote">${
             demo
               ? "Demo wallet — the server holds its keys, so every action here runs live."
-              : `A Voxy account owned by <code>${short(s.owners?.[0] || s.wallet)}</code>. Its guardians can recover it live; owner-only actions (cancel/freeze) need the owner to sign.`
+              : `Owned by <code>${short(s.owners?.[0] || s.wallet)}</code>. Account and guardian settings are read from chain.`
           }</p>
         </form>
+        ${(s.accounts?.length ?? 0) > 1 ? `<label class="vc-account-select">Your recovery accounts<select id="vc-account">${s.accounts.map((a) => `<option value="${a}" ${a.toLowerCase() === s.wallet.toLowerCase() ? "selected" : ""}>${a}</option>`).join("")}</select></label>` : ""}
         <nav class="vc-tabs" role="tablist">
           ${TABS.map(([id, label]) => `<button class="vc-tab ${view.tab === id ? "active" : ""}" data-tab="${id}" role="tab" aria-selected="${view.tab === id}">${label}</button>`).join("")}
         </nav>
@@ -420,19 +477,27 @@ export function mountConsole(container, mode) {
       load();
     });
 
+    container.querySelector("#vc-account")?.addEventListener("change", (e) => { view.wallet = e.target.value; view.draft = null; load(); });
     wireActions();
     startCountdown();
   }
 
   /* ----------------------------------------------------------- actions */
   function wireActions() {
+    const rememberRecoveryDraft = () => {
+      view.recovery = { ...view.recovery, requestText: container.querySelector("#vc-request").value, signaturesText: container.querySelector("#vc-signatures").value };
+    };
+    container.querySelectorAll("#vc-request, #vc-signatures").forEach((input) => input.addEventListener("input", rememberRecoveryDraft));
+    container.querySelector("#vc-setup-guardians")?.addEventListener("click", () => { view.tab = "guardians"; render(); });
+    container.querySelector("#vc-signconnect")?.addEventListener("click", (e) => doConnect(e.currentTarget, container.querySelector("#vc-gerr, #vc-approval-error, .vc-pending .error"), container.querySelector("#vc-signwallets"), () => { e.target.textContent = `Signing wallet: ${short(view.owner)}`; }));
+
     // guardians: live majority, add/remove rows, save
     container.querySelectorAll(".vc-slot-input[data-gi]").forEach((i) =>
       i.addEventListener("input", () => {
         view.draft[Number(i.dataset.gi)] = i.value;
         const n = view.draft.filter((v) => v.trim() !== "").length;
         const el = container.querySelector("#vc-maj");
-        if (el) el.textContent = `${majorityOf(n)} of ${n}`;
+        if (el) el.textContent = n ? `${majorityOf(n)} of ${n}` : "Not set";
       }),
     );
     container.querySelectorAll(".vc-slot-x[data-rm]").forEach((b) =>
@@ -478,7 +543,12 @@ export function mountConsole(container, mode) {
       const result = container.querySelector("#vc-gresult");
       result.innerHTML = `<div class="vc-note"><span class="status-dot"></span> Registering guardians on Sepolia, then syncing to devnet…</div>`;
       try {
-        const res = await api.setGuardians(guardians, threshold, S.wallet);
+        if (view.provider) view.owner = await requestAccount(view.provider);
+        if (!view.provider || !view.owner || !S.owners.some((a) => a.toLowerCase() === view.owner.toLowerCase())) throw new Error("Connect an owner of this account before saving guardians.");
+        const { message } = await api.guardianIntent(guardians, threshold, S.wallet);
+        const hex = `0x${Array.from(new TextEncoder().encode(message), (b) => b.toString(16).padStart(2, "0")).join("")}`;
+        const signature = await view.provider.request({ method: "personal_sign", params: [hex, view.owner] });
+        const res = await api.setGuardians(guardians, threshold, S.wallet, { message, signature });
         if (res.changed === false) {
           result.innerHTML = `<div class="vc-note vc-warn">${res.message}</div>`;
         } else {
@@ -519,7 +589,13 @@ export function mountConsole(container, mode) {
       btn.disabled = true;
       btn.textContent = "Submitting guardian quorum…";
       try {
-        const res = await api.startRecovery(input.value.trim());
+        if (S.wallet.toLowerCase() !== S.demoWallet.toLowerCase()) {
+          const prepared = await api.prepareRecovery(input.value.trim(), S.wallet);
+          view.recovery = { ...prepared, signatures: [] };
+          render();
+          return;
+        }
+        const res = await api.startRecovery(input.value.trim(), S.wallet);
         container.querySelector(".vc-panel").innerHTML =
           `<div class="vc-note vc-ok-note"><b>✓ Guardian quorum accepted (${res.quorum}).</b>${row("New owner", chip(res.newKey))}${row("Tx", `<a href="${S.explorer.devnet}/tx/${res.tx.hash}" target="_blank" rel="noopener">${short(res.tx.hash)} ↗</a>`)}<p class="vc-fine">A ${S.recoveryDelaySeconds}s time-lock is now running.</p></div><button class="button" id="vc-continue">View time-lock</button>`;
         container.querySelector("#vc-continue")?.addEventListener("click", load);
@@ -530,13 +606,46 @@ export function mountConsole(container, mode) {
       }
     });
 
+    container.querySelector("#vc-approve")?.addEventListener("click", async (e) => {
+      const err = container.querySelector("#vc-approval-error");
+      e.target.disabled = true;
+      try {
+        if (!view.provider) throw new Error("Connect a guardian wallet first.");
+        view.owner = await requestAccount(view.provider);
+        if (!S.roster.guardians.some((a) => a.toLowerCase() === view.owner.toLowerCase())) throw new Error("This signing wallet is not a guardian of this account.");
+        const message = JSON.parse(container.querySelector("#vc-request").value);
+        if (message.wallet.toLowerCase() !== S.wallet.toLowerCase()) throw new Error("This request is for a different account.");
+        const prepared = await api.prepareRecovery(message.newKey, S.wallet);
+        const typedData = { ...prepared.typedData, message };
+        await switchToDevnet();
+        const signature = await view.provider.request({ method: "eth_signTypedData_v4", params: [view.owner, JSON.stringify(typedData)] });
+        const signatures = container.querySelector("#vc-signatures");
+        signatures.value = [signatures.value.trim(), signature].filter(Boolean).join("\n");
+        rememberRecoveryDraft();
+        err.textContent = "Approval signed. Copy your signature to share it with the person collecting approvals.";
+      } catch (e2) { err.textContent = e2.message; }
+      finally { e.target.disabled = false; }
+    });
+    container.querySelector("#vc-submit-approvals")?.addEventListener("click", async (e) => {
+      const err = container.querySelector("#vc-approval-error");
+      e.target.disabled = true;
+      try {
+        const request = container.querySelector("#vc-request").value;
+        const message = JSON.parse(request);
+        const signatures = container.querySelector("#vc-signatures").value.split(/\s+/).filter(Boolean);
+        await api.startRecovery(message.newKey, S.wallet, request, signatures);
+        view.recovery = null;
+        await load();
+      } catch (e2) { err.textContent = e2.message; e.target.disabled = false; }
+    });
+
     // finalize recovery
     const exec = container.querySelector("#vc-execute");
     exec?.addEventListener("click", async () => {
       exec.disabled = true;
       exec.textContent = "Finalizing…";
       try {
-        const res = await api.executeRecovery();
+        const res = await api.executeRecovery(S.wallet);
         container.querySelector(".vc-panel").innerHTML =
           `<div class="vc-note vc-ok-note"><b>✓ New owner installed.</b>${row("Owners now", res.owners.map(ownerChip).join(" "))}${row("Tx", `<a href="${S.explorer.devnet}/tx/${res.tx.hash}" target="_blank" rel="noopener">${short(res.tx.hash)} ↗</a>`)}</div><button class="button" id="vc-done">Done</button>`;
         container.querySelector("#vc-done")?.addEventListener("click", load);
@@ -544,7 +653,7 @@ export function mountConsole(container, mode) {
         exec.disabled = false;
         exec.textContent = "Finalize recovery (add-only)";
         const n = container.querySelector(".vc-pending");
-        if (n) n.insertAdjacentHTML("beforeend", `<p class="error">${e3.message}</p>`);
+        if (n) n.insertAdjacentHTML("beforeend", `<p class="error">${escape(e3.message)}</p>`);
       }
     });
 
@@ -554,13 +663,30 @@ export function mountConsole(container, mode) {
       cancel.disabled = true;
       cancel.textContent = "Cancelling…";
       try {
-        await api.cancelRecovery();
+        if (S.wallet.toLowerCase() === S.demoWallet.toLowerCase()) {
+          await api.cancelRecovery(S.wallet);
+        } else {
+          if (!view.provider) throw new Error("Connect the owner wallet first.");
+          const [owner] = await view.provider.request({ method: "eth_requestAccounts" });
+          if (!S.owners.some((a) => a.toLowerCase() === owner?.toLowerCase())) throw new Error("Only an account owner can cancel recovery.");
+          await switchToDevnet();
+          const hash = await view.provider.request({ method: "eth_sendTransaction", params: [{ from: owner, ...S.ownerActions.cancel }] });
+          cancel.textContent = "Waiting for confirmation…";
+          let receipt;
+          for (let i = 0; i < 60; i++) {
+            receipt = await view.provider.request({ method: "eth_getTransactionReceipt", params: [hash] });
+            if (receipt) break;
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+          }
+          if (!receipt) throw new Error(`Transaction ${hash} is pending. Refresh live state to check it.`);
+          if (receipt.status !== "0x1") throw new Error("The cancellation transaction reverted.");
+        }
         load();
       } catch (e4) {
         cancel.disabled = false;
         cancel.textContent = "Cancel this recovery";
         const n = container.querySelector(".vc-pending");
-        if (n) n.insertAdjacentHTML("beforeend", `<p class="error">${e4.message}</p>`);
+        if (n) n.insertAdjacentHTML("beforeend", `<p class="error">${escape(e4.message)}</p>`);
       }
     });
   }
@@ -585,7 +711,13 @@ export function mountConsole(container, mode) {
     }
   }
 
-  renderEntry();
+  const remembered = new URL(location.href).searchParams.get("voxy");
+  if (remembered && isGuardianInput(remembered)) {
+    view.wallet = remembered;
+    load();
+  } else {
+    renderEntry();
+  }
   return () => {
     clearTimer();
     dialog?.classList.remove("vc-dialog");
