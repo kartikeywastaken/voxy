@@ -1,0 +1,17 @@
+{
+  "name": "@voxy/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/server.ts",
+  "scripts": {
+    "dev": "node --env-file=../../.env --import tsx --watch src/server.ts",
+    "start": "node --env-file=../../.env --import tsx src/server.ts"
+  },
+  "dependencies": {
+    "@voxy/chain": "workspace:*",
+    "@voxy/attester": "workspace:*",
+    "@voxy/orchestrator": "workspace:*",
+    "viem": "^2.38.0"
+  }
+}

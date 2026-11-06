@@ -1,0 +1,13 @@
+{
+  "name": "@voxy/frame-tx",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@forshtat/hegota-support": "*",
+    "@voxy/chain": "workspace:*",
+    "viem": "^2.38.0",
+    "@voxy/attester": "workspace:*"
+  }
+}
