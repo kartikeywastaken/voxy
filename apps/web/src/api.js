@@ -1,5 +1,11 @@
-// Thin client for the Voxy backend API (@voxy/api). Base URL is configurable for deploys.
-const BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8787";
+// Thin client for the Voxy backend API (@voxy/api). Base URL is configurable for deploys:
+//  - VITE_API_URL set  -> use it (split deploy: e.g. a separate Render API host).
+//  - unset in dev       -> local API on loopback.
+//  - unset in prod build -> "" (same-origin), so the browser hits /api/* on this domain.
+//    On Vercel the `/api/(.*)` rewrite routes those requests to the `api` service.
+const BASE =
+  import.meta.env.VITE_API_URL ??
+  (import.meta.env.DEV ? "http://127.0.0.1:8787" : "");
 
 async function call(path, options) {
   const res = await fetch(`${BASE}${path}`, {
