@@ -1,0 +1,14 @@
+{
+  "name": "keymesh",
+  "private": true,
+  "version": "0.1.0",
+  "license": "MIT",
+  "packageManager": "pnpm@10.30.2",
+  "workspaces": ["packages/*", "apps/*"],
+  "scripts": {
+    "bootstrap": "tsx scripts/bootstrap.ts",
+    "demo": "tsx scripts/demo.ts",
+    "attacks": "tsx scripts/attacks.ts",
+    "measure": "tsx scripts/measure.ts"
+  }
+}
