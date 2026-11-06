@@ -10,3 +10,16 @@ remappings = ["forge-std/=lib/forge-std/src/", "sepolia/=../sepolia/src/"]
 
 [fmt]
 line_length = 110
+
+[profile.frame]
+src = "framesrc"
+out = "out-frame"
+via_ir = true
+evm_version = "cancun"
+solc_version = "0.8.28"
+remappings = [
+  "forge-std/=lib/forge-std/src/",
+  "sepolia/=../sepolia/src/",
+  "@forshtat/hegota-support/=node_modules/@forshtat/hegota-support/",
+]
+allow_paths = ["node_modules"]

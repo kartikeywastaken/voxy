@@ -1,0 +1,11 @@
+{
+  "name": "@voxy/contracts-devnet",
+  "private": true,
+  "description": "Foundry project for Voxy devnet contracts. The 'frame' profile needs the EIP-8141 hegota support lib.",
+  "dependencies": {
+    "@forshtat/hegota-support": "*"
+  },
+  "scripts": {
+    "frame:build": "FOUNDRY_PROFILE=frame forge build"
+  }
+}

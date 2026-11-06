@@ -9,3 +9,4 @@ broadcast/
 dist/
 .DS_Store
 deployments.local.json
+out-frame/
