@@ -100,7 +100,54 @@ export function mountConsole(container, mode) {
       return;
     }
     if (!view.draft) view.draft = draftFrom(G);
+    if (S.isVoxyWallet === false) {
+      renderNotVoxy();
+      return;
+    }
     render();
+  }
+
+  /* ----------------------------------------- not a Voxy wallet (an EOA) */
+  function renderNotVoxy() {
+    clearTimer();
+    const s = S;
+    container.innerHTML = `
+      <div class="vc-head">
+        <span class="preview-label">VOXY / RECOVERY CONSOLE · LIVE</span>
+        <h2 class="vc-title">${mode === "recover" ? "Recover a wallet" : "Protect a wallet"}</h2>
+        <form id="vc-switch" class="vc-walletbar">
+          <label for="vc-wallet">${mode === "recover" ? "Wallet to recover" : "Wallet to protect"}</label>
+          <div class="vc-walletbar-row">
+            <input id="vc-wallet" value="${view.wallet ?? ""}" placeholder="0x… address or name.eth" autocomplete="off" spellcheck="false" />
+            <button class="button button-small" type="submit">Load</button>
+          </div>
+          <p id="vc-wallet-err" class="error" role="alert"></p>
+        </form>
+      </div>
+      <div class="vc-panel">
+        <div class="vc-note vc-warn"><b>${short(s.wallet)}</b> is a regular Ethereum account (EOA), not a Voxy-managed wallet on the alt-mempool devnet — so there is no recovery state to show here.
+          <p class="vc-fine">This testnet demo reads and runs live recovery for Voxy wallets. Protecting your own MetaMask wallet would set up a Voxy recovery for it — a deployed smart-account, or an EIP-7702 delegation of your EOA — which isn't wired for arbitrary wallets in this demo.</p>
+        </div>
+        <button class="button" id="vc-usedemo">Use the live demo wallet →</button>
+      </div>
+      <div class="vc-foot">
+        <span class="vc-dim">Live reads · Sepolia + alt-mempool devnet</span>
+      </div>`;
+    container.querySelector("#vc-switch")?.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const v = container.querySelector("#vc-wallet").value.trim();
+      const err = container.querySelector("#vc-wallet-err");
+      if (v && !isGuardianInput(v)) {
+        if (err) err.textContent = "Enter a 0x… address or a name.eth.";
+        return;
+      }
+      view.wallet = v && v.toLowerCase() !== s.demoWallet.toLowerCase() ? v : undefined;
+      load();
+    });
+    container.querySelector("#vc-usedemo")?.addEventListener("click", () => {
+      view.wallet = undefined;
+      load();
+    });
   }
 
   /* -------------------------------------------------------------- panels */

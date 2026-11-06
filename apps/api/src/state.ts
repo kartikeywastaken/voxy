@@ -11,6 +11,19 @@ export async function walletState(wallet?: Address) {
   const reader = devnetReader();
   const base = { address: w, abi: voxyWalletAbi } as const;
 
+  // A VoxyWallet is a contract on the devnet. A plain EOA (e.g. a MetaMask address) has no code
+  // there, so the wallet reads would throw "returned no data". Detect that and return cleanly.
+  const code = await reader.getCode({ address: w }).catch(() => undefined);
+  if (!code || code === "0x") {
+    return {
+      wallet: w,
+      demoWallet: d.devnet.VoxyWallet,
+      isVoxyWallet: false,
+      chain: { devnet: d.devnet.chainId, sepolia: d.sepolia.chainId },
+      explorer: { devnet: d.devnet.explorer, sepolia: d.sepolia.explorer },
+    } as const;
+  }
+
   const [owners, ownerEpoch, frozen, recoveryDelay, pending, sync] = await Promise.all([
     reader.readContract({ ...base, functionName: "owners" }),
     reader.readContract({ ...base, functionName: "ownerEpoch" }),
@@ -39,6 +52,7 @@ export async function walletState(wallet?: Address) {
   return {
     wallet: w,
     demoWallet: d.devnet.VoxyWallet,
+    isVoxyWallet: true,
     chain: { devnet: d.devnet.chainId, sepolia: d.sepolia.chainId },
     explorer: { devnet: d.devnet.explorer, sepolia: d.sepolia.explorer },
     identity: {
