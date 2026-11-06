@@ -345,3 +345,62 @@ select.vc-slot-input { cursor: pointer; }
   font-size: 13px;
 }
 .vc-majority b { font-family: "DM Mono", monospace; color: var(--accent); font-weight: 500; }
+
+/* --- entry gate (ask which wallet first) --- */
+.vc-enter { display: flex; flex-direction: column; gap: 12px; margin-top: 22px; }
+.vc-enter label {
+  font-family: "DM Mono", monospace;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.vc-enter .vc-fine { margin-top: 4px; }
+
+/* --- demo badge on the title --- */
+.vc-badge {
+  font-family: "DM Mono", monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 500;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  padding: 2px 7px;
+  vertical-align: middle;
+  margin-left: 10px;
+}
+
+/* --- add / remove guardian rows --- */
+.vc-slot-x {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 20px;
+  line-height: 1;
+  border-radius: 7px;
+  transition: all 0.15s ease-out;
+}
+.vc-slot-x:hover:not(:disabled) { color: var(--accent); background: var(--pale); }
+.vc-slot-x:disabled { opacity: 0.25; cursor: default; }
+.vc-addg {
+  align-self: flex-start;
+  background: none;
+  border: 1px dashed var(--line);
+  border-radius: 9px;
+  padding: 9px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+  transition: all 0.15s ease-out;
+}
+.vc-addg:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.vc-addg:disabled { opacity: 0.45; cursor: default; }
+
+/* --- cancel recovery --- */
+.vc-cancel { display: block; margin-top: 10px; color: var(--muted); }
+.vc-cancel:hover { color: var(--accent); }

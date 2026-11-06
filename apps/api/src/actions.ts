@@ -42,6 +42,24 @@ export async function startRecovery(newKey: Address) {
   };
 }
 
+/** Cancel the pending recovery. Owner-gated; the server's devnet deployer key is an owner. */
+export async function cancelRecovery() {
+  const d = loadDeployments();
+  const wallet = d.devnet.VoxyWallet as Address;
+  const owner = privateKeyToAccount(pk("DEVNET_DEPLOYER_PK"));
+  const reader = devnetReader();
+  const { request } = await reader.simulateContract({
+    address: wallet,
+    abi: voxyWalletAbi,
+    functionName: "cancelRecovery",
+    account: owner,
+  });
+  const txHash = await devnetWallet(owner).writeContract(request);
+  const receipt = await reader.waitForTransactionReceipt({ hash: txHash });
+  if (receipt.status !== "success") throw new Error(`cancelRecovery reverted: ${txHash}`);
+  return { tx: { hash: txHash, explorer: `${d.devnet.explorer}/tx/${txHash}` } };
+}
+
 /** Finalise a pending recovery (add-only) after the on-chain delay has elapsed. */
 export async function executeRecovery() {
   const d = loadDeployments();

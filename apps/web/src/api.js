@@ -28,6 +28,7 @@ export const api = {
   startRecovery: (newKey) =>
     call("/api/recover/start", { method: "POST", body: JSON.stringify({ newKey }) }),
   executeRecovery: () => call("/api/recover/execute", { method: "POST" }),
+  cancelRecovery: () => call("/api/recover/cancel", { method: "POST" }),
 };
 
 export const short = (addr) => (addr ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : "—");

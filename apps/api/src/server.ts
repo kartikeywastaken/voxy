@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { isAddress, zeroAddress } from "viem";
-import { executeRecovery, startRecovery } from "./actions.js";
+import { cancelRecovery, executeRecovery, startRecovery } from "./actions.js";
 import { guardianConfig, resolveGuardian, setGuardians } from "./guardians.js";
 import { walletState } from "./state.js";
 
@@ -104,6 +104,10 @@ const server = createServer(async (req, res) => {
 
     if (route === "POST /api/recover/execute") {
       return send(res, 200, await executeRecovery());
+    }
+
+    if (route === "POST /api/recover/cancel") {
+      return send(res, 200, await cancelRecovery());
     }
 
     return send(res, 404, { error: "not found" });
