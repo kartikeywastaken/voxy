@@ -12,11 +12,9 @@
 :root{interpolate-size:allow-keywords}
 ::placeholder{color:oklch(51% .014 70);opacity:1}
 input{caret-color:var(--accent)}
-*::-webkit-scrollbar{width:11px;height:11px}
-*::-webkit-scrollbar-thumb{background:oklch(51% .014 70 / .55);border:3px solid transparent;background-clip:padding-box;border-radius:7px}
-*::-webkit-scrollbar-thumb:hover{background:var(--ink)}
-*::-webkit-scrollbar-track,*::-webkit-scrollbar-corner{background:transparent}
-dialog{scrollbar-width:thin;scrollbar-color:oklch(51% .014 70 / .55) transparent}
+/* Scrollbars hidden everywhere; scrolling (incl. Lenis + the dialog) still works. */
+*{scrollbar-width:none;-ms-overflow-style:none}
+*::-webkit-scrollbar{width:0;height:0;display:none}
 h2{text-wrap:balance}
 dialog h2{text-wrap:balance}
 p{text-wrap:pretty}
