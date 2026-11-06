@@ -3,7 +3,9 @@ import { isAddress, zeroAddress } from "viem";
 import { executeRecovery, startRecovery } from "./actions.js";
 import { walletState } from "./state.js";
 
-const PORT = Number(process.env.VOXY_API_PORT || 8787);
+// Cloud hosts (Render/Railway/Fly) inject PORT and need 0.0.0.0; locally we stay on loopback.
+const PORT = Number(process.env.PORT || process.env.VOXY_API_PORT || 8787);
+const HOST = process.env.HOST || (process.env.PORT ? "0.0.0.0" : "127.0.0.1");
 const MAX_BODY = 8192;
 // Optional shared-secret for the state-changing (fund-spending) endpoints. Unset => open, for the
 // local demo. Set VOXY_API_TOKEN to require `Authorization: Bearer <token>` on POSTs.
@@ -86,8 +88,6 @@ const server = createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, "127.0.0.1", () => {
-  console.log(
-    `voxy api listening on http://127.0.0.1:${PORT}${API_TOKEN ? " (auth required)" : ""}`,
-  );
+server.listen(PORT, HOST, () => {
+  console.log(`voxy api listening on http://${HOST}:${PORT}${API_TOKEN ? " (auth required)" : ""}`);
 });

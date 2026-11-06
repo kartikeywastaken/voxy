@@ -156,3 +156,47 @@
   gap: 10px;
   flex-wrap: wrap;
 }
+
+/* --- section labels + enforcement surfaces (on-theme, instrument feel) --- */
+.vc-seclabel {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 26px 0 10px;
+  font-family: "DM Mono", monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.vc-seclabel:first-of-type { margin-top: 22px; }
+.vc-secn { color: var(--accent); font-weight: 500; }
+
+.vc-ext {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 12px;
+  margin-left: 2px;
+  transition: opacity 0.18s ease-out;
+}
+.vc-ext:hover { opacity: 0.6; }
+
+.vc-surfaces {
+  display: grid;
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.vc-surface { background: var(--bg); padding: 13px 14px; transition: background 0.2s ease-out; }
+.vc-surface:hover { background: var(--pale); }
+.vc-surface-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+.vc-surface-name { font-size: 14px; font-weight: 500; letter-spacing: -0.01em; }
+.vc-surface-addr { display: flex; align-items: center; gap: 6px; margin-top: 7px; }
+.vc-surface .vc-fine { margin-top: 6px; }

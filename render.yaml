@@ -1,0 +1,34 @@
+# One-click-ish deploy of the Voxy API on Render (free tier). Set the secret env vars in the
+# dashboard after the first deploy. The static frontend is hosted separately (see docs/DEPLOY.md).
+services:
+  - type: web
+    name: voxy-api
+    runtime: docker
+    dockerfilePath: ./apps/api/Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      - key: SEPOLIA_RPC_URL
+        sync: false
+      - key: DEVNET_RPC_URL
+        sync: false
+      - key: ARKIV_ACCESS_KEY
+        sync: false
+      - key: ARKIV_WRITER_PK
+        sync: false
+      - key: DEVNET_DEPLOYER_PK
+        sync: false
+      - key: GUARDIAN_1_PK
+        sync: false
+      - key: GUARDIAN_2_PK
+        sync: false
+      - key: GUARDIAN_3_PK
+        sync: false
+      - key: ATTESTER_1_PK
+        sync: false
+      - key: ATTESTER_2_PK
+        sync: false
+      - key: VOXY_API_TOKEN
+        sync: false

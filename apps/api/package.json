@@ -6,7 +6,8 @@
   "exports": "./src/server.ts",
   "scripts": {
     "dev": "node --env-file=../../.env --import tsx --watch src/server.ts",
-    "start": "node --env-file=../../.env --import tsx src/server.ts"
+    "start": "node --env-file=../../.env --import tsx src/server.ts",
+    "start:prod": "node --import tsx src/server.ts"
   },
   "dependencies": {
     "@voxy/chain": "workspace:*",

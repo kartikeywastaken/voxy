@@ -24,10 +24,55 @@ export async function walletState(wallet?: Address) {
   const now = Math.floor(Date.now() / 1000);
   const hasPending = pendingKey !== "0x0000000000000000000000000000000000000000";
 
+  // Extra deployed addresses the typed loader doesn't declare — read loosely for display only.
+  const dd = d as unknown as {
+    devnet: { VoxyWalletFrame?: string; frame?: { recoveryFrameTx?: string } };
+    sepolia: {
+      VoxyDelegate?: string;
+      RosterPublisher: string;
+      eoa7702Demo?: { recoveredSpendTx?: string };
+    };
+  };
+  const addr = (chain: "devnet" | "sepolia", a?: string) =>
+    a ? `${d[chain].explorer}/address/${a}` : undefined;
+
   return {
     wallet: w,
     chain: { devnet: d.devnet.chainId, sepolia: d.sepolia.chainId },
     explorer: { devnet: d.devnet.explorer, sepolia: d.sepolia.explorer },
+    identity: {
+      publisher: d.sepolia.RosterPublisher,
+      account: d.sepolia.rosterAccount,
+      explorer: addr("sepolia", d.sepolia.RosterPublisher),
+    },
+    surfaces: [
+      {
+        kind: "ordinary",
+        label: "Ordinary transaction",
+        chain: "alt-mempool devnet",
+        address: d.devnet.VoxyWallet,
+        explorer: addr("devnet", d.devnet.VoxyWallet),
+        note: "guardian quorum checked in execution",
+      },
+      {
+        kind: "frame",
+        label: "EIP-8141 VERIFY frame",
+        chain: "alt-mempool devnet",
+        address: dd.devnet.VoxyWalletFrame,
+        explorer: addr("devnet", dd.devnet.VoxyWalletFrame),
+        tx: dd.devnet.frame?.recoveryFrameTx,
+        note: "quorum in validation via sigparam, staked admission",
+      },
+      {
+        kind: "eoa7702",
+        label: "Existing EOA · EIP-7702",
+        chain: "sepolia",
+        address: dd.sepolia.VoxyDelegate,
+        explorer: addr("sepolia", dd.sepolia.VoxyDelegate),
+        tx: dd.sepolia.eoa7702Demo?.recoveredSpendTx,
+        note: "recover the wallet you already have, no migration",
+      },
+    ],
     owners: owners as Address[],
     ownerCount: (owners as Address[]).length,
     ownerEpoch: Number(ownerEpoch),

@@ -1,0 +1,6 @@
+[build]
+  command = "pnpm install --frozen-lockfile && pnpm --filter @voxy/web build"
+  publish = "apps/web/dist"
+[build.environment]
+  # point the frontend at your deployed API (set in Netlify UI or here)
+  VITE_API_URL = "https://voxy-api.onrender.com"

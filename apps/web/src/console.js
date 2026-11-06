@@ -42,21 +42,49 @@ function renderState(state, mode) {
       </form>`;
   }
 
+  const ext = (href) => (href ? `<a class="vc-ext" href="${href}" target="_blank" rel="noopener" aria-label="View on explorer">↗</a>` : "");
+  const sec = (n, t) => `<div class="vc-seclabel"><span class="vc-secn">${n}</span>${t}</div>`;
+  const surfaces = (state.surfaces || [])
+    .filter((s) => s.address)
+    .map(
+      (s) => `
+      <div class="vc-surface">
+        <div class="vc-surface-top"><span class="vc-surface-name">${s.label}</span><span class="vc-dim">${s.chain}</span></div>
+        <div class="vc-surface-addr"><code class="vc-chip" title="${s.address}">${short(s.address)}</code>${ext(s.explorer)}</div>
+        <p class="vc-fine">${s.note}</p>
+      </div>`,
+    )
+    .join("");
+
   return `
     <span class="preview-label">VOXY / RECOVERY CONSOLE · LIVE</span>
     <h2>${mode === "recover" ? "Recover this wallet" : "Your wallet, protected"}</h2>
+
+    ${sec("01", "Wallet")}
     <div class="vc-grid">
-      ${row("Wallet", `<code class="vc-chip" title="${state.wallet}">${short(state.wallet)}</code>`)}
+      ${row("Address", `<code class="vc-chip" title="${state.wallet}">${short(state.wallet)}</code>${ext(`${state.explorer.devnet}/address/${state.wallet}`)}`)}
       ${row("Owners", `${ownerList} <span class="vc-dim">(${state.ownerCount})</span>`)}
       ${row("Owner epoch", state.ownerEpoch)}
-      ${row("Guardians", `${guardianList} <span class="vc-dim">· ${state.roster.threshold}-of-${g.length}</span>`)}
-      ${row("Roster epoch", state.roster.epoch)}
-      ${row("ENS ↔ devnet sync", match ? "✓ matched" : "✗ mismatch", match ? "vc-ok" : "vc-bad")}
     </div>
+
+    ${sec("02", "Guardians, your ENS names")}
+    <div class="vc-grid">
+      ${row("Roster", `${guardianList} <span class="vc-dim">· ${state.roster.threshold}-of-${g.length}</span>`)}
+    </div>
+
+    ${sec("03", "Cross-chain, one roster")}
+    <div class="vc-grid">
+      ${row("Sepolia ENS roster", `<code class="vc-chip" title="${state.roster.sepoliaRosterHash}">${short(state.roster.sepoliaRosterHash)}</code>${ext(state.identity && state.identity.explorer)}`)}
+      ${row("Devnet registry", `<code class="vc-chip" title="${state.roster.rosterHash}">${short(state.roster.rosterHash)}</code>`)}
+      ${row("Status", match ? "✓ one identity, two chains" : "✗ mismatch", match ? "vc-ok" : "vc-bad")}
+    </div>
+
+    ${surfaces ? `${sec("04", "Enforcement surfaces")}<div class="vc-surfaces">${surfaces}</div>` : ""}
+
     <div class="vc-action">${action}</div>
     <div class="vc-foot">
       <button class="text-button" id="vc-refresh">↻ Refresh live state</button>
-      <span class="vc-dim">Reads from Sepolia + alt-mempool devnet. No mocks.</span>
+      <span class="vc-dim">Live reads · Sepolia + alt-mempool devnet · no mocks</span>
     </div>`;
 }
 
