@@ -26,7 +26,9 @@
     "measure": "tsx scripts/measure.ts",
     "voxy:request": "node --env-file=.env --import tsx packages/orchestrator/src/sovereign-cli.ts request",
     "voxy:sign": "node --env-file=.env --import tsx packages/orchestrator/src/sovereign-cli.ts sign",
-    "voxy:recover": "node --env-file=.env --import tsx packages/orchestrator/src/sovereign-cli.ts recover"
+    "voxy:recover": "node --env-file=.env --import tsx packages/orchestrator/src/sovereign-cli.ts recover",
+    "test:api": "forge build --root contracts/devnet && node --import tsx --test apps/api/src/*.test.ts",
+    "test:ens": "forge build --root contracts/devnet --quiet && forge build --root contracts/sepolia --quiet && node --import tsx apps/api/scripts/verify-ens.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.0",

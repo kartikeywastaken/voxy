@@ -18,17 +18,19 @@ async function call(path, options) {
 }
 
 export const api = {
-  state: (wallet) => call(wallet ? `/api/state?wallet=${wallet}` : "/api/state"),
-  guardians: () => call("/api/guardians"),
-  setGuardians: (guardians, threshold, wallet) =>
+  state: (wallet) => call(wallet ? `/api/state?wallet=${encodeURIComponent(wallet)}` : "/api/state"),
+  guardians: (wallet) => call(`/api/guardians${wallet ? `?wallet=${encodeURIComponent(wallet)}` : ""}`),
+  guardianIntent: (guardians, threshold, wallet) => call("/api/guardians/prepare", { method: "POST", body: JSON.stringify({ guardians, threshold, wallet }) }),
+  setGuardians: (guardians, threshold, wallet, authorization) =>
     call("/api/guardians/set", {
       method: "POST",
-      body: JSON.stringify({ guardians, threshold, wallet }),
+      body: JSON.stringify({ guardians, threshold, wallet, ...authorization }),
     }),
-  startRecovery: (newKey) =>
-    call("/api/recover/start", { method: "POST", body: JSON.stringify({ newKey }) }),
-  executeRecovery: () => call("/api/recover/execute", { method: "POST" }),
-  cancelRecovery: () => call("/api/recover/cancel", { method: "POST" }),
+  prepareRecovery: (newKey, wallet) => call("/api/recover/prepare", { method: "POST", body: JSON.stringify({ newKey, wallet }) }),
+  startRecovery: (newKey, wallet, request, signatures) =>
+    call("/api/recover/start", { method: "POST", body: JSON.stringify({ newKey, wallet, request, signatures }) }),
+  executeRecovery: (wallet) => call("/api/recover/execute", { method: "POST", body: JSON.stringify({ wallet }) }),
+  cancelRecovery: (wallet) => call("/api/recover/cancel", { method: "POST", body: JSON.stringify({ wallet }) }),
   createWallet: (owner) =>
     call("/api/wallet/create", { method: "POST", body: JSON.stringify({ owner }) }),
 };

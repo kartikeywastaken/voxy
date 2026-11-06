@@ -1,7 +1,14 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { isAddress, zeroAddress } from "viem";
-import { cancelRecovery, executeRecovery, startRecovery } from "./actions.js";
-import { guardianConfig, resolveGuardian, setGuardians } from "./guardians.js";
+import { getAddress, isAddress, isHex, zeroAddress } from "viem";
+import { cancelRecovery, executeRecovery, prepareRecovery, startRecovery } from "./actions.js";
+import {
+  authorizeGuardians,
+  guardianConfig,
+  guardianIntent,
+  resolveGuardian,
+  setGuardians,
+} from "./guardians.js";
+import { sponsoredWrite } from "./queue.js";
 import { walletState } from "./state.js";
 import { createWallet } from "./wallet.js";
 
@@ -74,7 +81,12 @@ const server = createServer(async (req, res) => {
       }
       return send(res, 200, await walletState(w));
     }
-    if (route === "GET /api/guardians") return send(res, 200, await guardianConfig());
+    if (route === "GET /api/guardians") {
+      const wallet = url.searchParams.get("wallet");
+      if (wallet && !isAddress(wallet, { strict: false }))
+        return send(res, 400, { error: "Invalid wallet" });
+      return send(res, 200, await guardianConfig(wallet ? getAddress(wallet) : undefined));
+    }
 
     // --- state-changing routes (spend funds / sign) require auth when a token is configured ---
     if (
@@ -91,21 +103,46 @@ const server = createServer(async (req, res) => {
       if (typeof owner !== "string" || !isAddress(owner, { strict: false })) {
         return send(res, 400, { error: "owner must be an address" });
       }
-      return send(res, 200, await createWallet(owner));
+      return send(res, 200, await sponsoredWrite(() => createWallet(owner)));
     }
 
-    if (route === "POST /api/guardians/set") {
+    if (route === "POST /api/guardians/set" || route === "POST /api/guardians/prepare") {
       const body = await readJson(req);
       const guardians = body.guardians;
       if (!Array.isArray(guardians) || guardians.length !== 3) {
         return send(res, 400, { error: "guardians must be an array of 3 entries" });
       }
       const threshold = body.threshold === undefined ? undefined : Number(body.threshold);
-      const wallet = typeof body.wallet === "string" ? body.wallet : undefined;
-      return send(res, 200, await setGuardians({ guardians: guardians.map(String), threshold, wallet }));
+      if (
+        typeof body.wallet !== "string" ||
+        !isAddress(body.wallet, { strict: false }) ||
+        guardians.some((g) => typeof g !== "string")
+      )
+        return send(res, 400, { error: "wallet and guardian strings are required" });
+      const wallet = getAddress(body.wallet);
+      const input = { guardians: guardians as string[], threshold, wallet };
+      if (route.endsWith("/prepare"))
+        return send(res, 200, {
+          message: await guardianIntent(wallet, input.guardians, threshold),
+        });
+      if (
+        typeof body.message !== "string" ||
+        typeof body.signature !== "string" ||
+        !isHex(body.signature)
+      )
+        return send(res, 400, { error: "Sign the guardian change with an account owner" });
+      const { message, signature } = body as { message: string; signature: `0x${string}` };
+      return send(
+        res,
+        200,
+        await sponsoredWrite(async () => {
+          await authorizeGuardians({ ...input, message, signature });
+          return setGuardians(input);
+        }),
+      );
     }
 
-    if (route === "POST /api/recover/start") {
+    if (route === "POST /api/recover/start" || route === "POST /api/recover/prepare") {
       const body = await readJson(req);
       const newKey = body.newKey;
       if (typeof newKey !== "string" || !isAddress(newKey, { strict: false })) {
@@ -114,21 +151,68 @@ const server = createServer(async (req, res) => {
       if (newKey.toLowerCase() === zeroAddress) {
         return send(res, 400, { error: "newKey cannot be the zero address" });
       }
-      return send(res, 200, await startRecovery(newKey));
+      if (typeof body.wallet !== "string" || !isAddress(body.wallet, { strict: false }))
+        return send(res, 400, { error: "wallet is required" });
+      const wallet = getAddress(body.wallet);
+      if (route.endsWith("/prepare"))
+        return send(res, 200, await prepareRecovery(getAddress(newKey), wallet));
+      if (body.request !== undefined && typeof body.request !== "string")
+        return send(res, 400, { error: "request must be JSON text" });
+      if (
+        body.signatures !== undefined &&
+        (!Array.isArray(body.signatures) ||
+          body.signatures.length > 3 ||
+          body.signatures.some((s) => typeof s !== "string" || !/^0x[0-9a-f]{130}$/i.test(s)))
+      )
+        return send(res, 400, { error: "Expected up to 3 guardian signatures" });
+      return send(
+        res,
+        200,
+        await sponsoredWrite(() =>
+          startRecovery(
+            getAddress(newKey),
+            wallet,
+            body.request as string | undefined,
+            body.signatures as `0x${string}`[] | undefined,
+          ),
+        ),
+      );
     }
 
     if (route === "POST /api/recover/execute") {
-      return send(res, 200, await executeRecovery());
+      const body = await readJson(req);
+      if (typeof body.wallet !== "string" || !isAddress(body.wallet, { strict: false }))
+        return send(res, 400, { error: "wallet is required" });
+      return send(
+        res,
+        200,
+        await sponsoredWrite(() => executeRecovery(getAddress(body.wallet as string))),
+      );
     }
 
     if (route === "POST /api/recover/cancel") {
-      return send(res, 200, await cancelRecovery());
+      const body = await readJson(req);
+      if (typeof body.wallet !== "string" || !isAddress(body.wallet, { strict: false }))
+        return send(res, 400, { error: "wallet is required" });
+      return send(
+        res,
+        200,
+        await sponsoredWrite(() => cancelRecovery(getAddress(body.wallet as string))),
+      );
     }
 
     return send(res, 404, { error: "not found" });
   } catch (err) {
     // Surface a readable message without leaking RPC credentials or stack traces.
-    const message = err instanceof Error ? err.message : "server error";
+    const message =
+      err &&
+      typeof err === "object" &&
+      "shortMessage" in err &&
+      typeof err.shortMessage === "string"
+        ? err.shortMessage
+        : err instanceof Error
+          ? err.message
+          : "server error";
     return send(res, 500, { error: message.slice(0, 300) });
   }
 });

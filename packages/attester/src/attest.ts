@@ -21,11 +21,11 @@ export function attesterAccount(pk: string) {
  */
 export async function buildAttestation(
   epoch: bigint,
-  opts: { account?: Address; validForSeconds?: number } = {},
+  opts: { account?: Address; sourceAccount?: Address; validForSeconds?: number } = {},
 ): Promise<RosterAttestation> {
   const d = loadDeployments();
   const wallet = opts.account ?? (d.devnet.VoxyWallet as Address);
-  const roster = await readSepoliaRoster(opts.account);
+  const roster = await readSepoliaRoster(opts.sourceAccount ?? opts.account);
   const block = await sepoliaReader().getBlock({ blockTag: "latest" });
   const now = Math.floor(Date.now() / 1000);
   return {

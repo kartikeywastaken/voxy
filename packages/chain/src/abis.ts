@@ -225,6 +225,18 @@ export const voxyWalletAbi = [
 export const rosterPublisherAbi = [
   {
     type: "function",
+    name: "configOf",
+    stateMutability: "view",
+    inputs: [{ name: "account", type: "address" }],
+    outputs: [
+      { name: "registry", type: "address" },
+      { name: "resolver", type: "address" },
+      { name: "node", type: "bytes32" },
+      { name: "set", type: "bool" },
+    ],
+  },
+  {
+    type: "function",
     name: "configure",
     stateMutability: "nonpayable",
     inputs: [
