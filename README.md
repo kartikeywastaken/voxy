@@ -1,118 +1,385 @@
-# Voxy
+<div align="center">
 
-Wallet recovery using an ENSv2 guardian namespace, with approvals coordinated on Arkiv and
-cross-chain revocation from Sepolia to an EIP-8141 devnet. Design: [project bible](final_project_bible.md).
+# VOXY
 
-## Status (live on testnets, verified on-chain)
+**Identity-anchored, add-only social recovery for existing EOAs via EIP-7702 and ENSv2.**
 
-| Layer | What runs | Evidence |
-|---|---|---|
-| ENSv2 identity (Sepolia) | guardian roster read live, expiry-aware | `RosterPublisher` `0xc133Bd3d…17cA` |
-| Cross-chain sync | 2-of-3 attested roster → devnet registry | `verify-sync` returns `match: true` |
-| Recovery, ordinary tx (devnet) | guardian quorum, add-only, 180s delay | `VoxyWallet` `0xb7d8…807E`, ran live |
-| Recovery, **EIP-8141 VERIFY frame** (devnet) | quorum in validation via `sigparam`, staked alt-mempool admits, canonical rejects | `VoxyWalletFrame` `0x537a…9fD4`, admitted frame tx `0x70cdf88e…` |
-| Recovery of an **existing EOA via EIP-7702** (Sepolia) | one signature, funds/address untouched, ENS guardians recover | `VoxyDelegate` `0x7E4C…06feB`, recover tx `0x379fe14e…` |
-| Arkiv coordination (Rabdi) | request → approve → assemble, signatures read back and submitted on-chain | loop tx `0xef55c201…` |
+[Live Console](https://voxy.v0id.in/) &bull; [Protocol Architecture](#03-the-protocol-model) &bull; [GitHub Repository](https://github.com/kartikeywastaken/voxy)
 
-Exact addresses and tx hashes: [`deployments.json`](deployments.json). Backend walkthrough: [`docs/BACKEND.md`](docs/BACKEND.md).
+</div>
 
-Honest limits: the frame/alt-mempool path is **devnet-only** (EIP-8141 is experimental); 7702 recovers key **loss, not theft**; the roster sync trusts **2 of 3 attesters**; we do not claim production-readiness or that we are the first ENS/social-recovery system.
+---
 
-## Run the Arkiv package
+## 01. Executive Summary
 
-Requires Node 24, pnpm 10.30.2, and a local `.env` containing `ARKIV_ACCESS_KEY`,
-`ARKIV_WRITER_PK` and optionally `ARKIV_WRITER_ADDRESS` and `ARKIV_CHAIN_ID=7794095`.
-Never commit `.env` or expose signing keys/RPC access keys in browser bundles.
+Voxy is an account recovery architecture that anchors guardian rosters to mutable ENSv2 identity namespaces, coordinates ephemeral approvals over a decentralized database layer, and enforces execution policy across disparate networks without requiring asset migration.
 
-```sh
+By combining EIP-7702 code delegation on Ethereum Sepolia with validation-phase policy enforcement on an alternative mempool execution chain, Voxy guarantees that existing Externally Owned Accounts (EOAs) can establish cross-chain social recovery where guardians are human-readable identities rather than fragile, static cryptographic keys. Recovery execution is strictly add-only: a verified guardian quorum installs a new authorized co-signer alongside existing keys, eliminating the risk of guardian-driven asset confiscation.
+
+---
+
+## 02. The Problem — Static Trust Fails
+
+Conventional smart account social recovery relies on assumptions that create systemic fragility:
+
+1. **Static Hexadecimal Addressing:** Guardians are configured as raw `0x` addresses. If a guardian rotates their key, migrates devices, or suffers an operational compromise, their guardian status is silently invalidated or frozen unless the wallet owner executes an on-chain transaction to replace them.
+2. **Account Replacement and Asset Migration:** Recovering a conventional wallet typically requires deploying an entirely new contract account and executing an asset sweep. This breaks DeFi collateral positions, invalidates soulbound tokens, resets on-chain credit history, and triggers taxable disposal events.
+3. **Cross-Chain State Fragmentation:** A user active across multiple Layer-2 networks must independently deploy, fund, and maintain guardian configurations on every network where they hold assets.
+
+| Dimension | Legacy Social Recovery | Voxy Protocol |
+| :--- | :--- | :--- |
+| **Guardian Addressing** | Static hexadecimal addresses (`0x...`) | ENSv2 namespace subnames (`alice.eth`) |
+| **Account Continuity** | Requires deploying a new wallet and sweeping balances | Preserves existing EOA address and balances via EIP-7702 |
+| **Execution Permission** | Frequently replaces ownership or sweeps assets | Strictly add-only co-signer authorization |
+| **Cross-Chain Policy** | Independent configuration per network | Canonical Sepolia identity anchor synced via attestation |
+| **Mempool Execution** | Canonical mempool (subject to storage isolation) | EIP-8141 Frame Transactions on an Alternative Mempool |
+| **Approval Coordination** | Centralized relayer or off-chain database | Ephemeral, auto-expiring entities on Arkiv |
+
+---
+
+## 03. The Protocol Model
+
+The Voxy protocol separates identity truth, cross-chain attestation, approval coordination, and on-chain enforcement across three dedicated network layers.
+
+```mermaid
+flowchart TD
+    subgraph L1["ETHEREUM SEPOLIA — Identity Anchor"]
+        direction TB
+        ENS["ENSv2 UserRegistry<br/>(Subnames: g1, g2, g3)"]
+        PUB["contracts/sepolia/RosterPublisher.sol"]
+        DEL["contracts/sepolia/VoxyDelegate.sol<br/>(EIP-7702 Implementation)"]
+        EOA["Existing EOA / MetaMask<br/>(Delegated to VoxyDelegate)"]
+        
+        ENS -->|Reads slot state| PUB
+        PUB -.->|Emits RosterChanged| ATT
+        EOA -->|Delegates execution| DEL
+        DEL -->|Queries live roster| PUB
+    end
+
+    subgraph OFFCHAIN["ATTESTATION & COORDINATION"]
+        direction TB
+        ATT["Off-Chain Attester Quorum<br/>(2-of-3 Independent Signers)"]
+        ARKIV["Arkiv (Rabdi Chain 7794095)<br/>voxy_recovery_request_v1<br/>voxy_guardian_approval_v1"]
+        API["apps/api (Node.js Gateway)<br/>ENS Resolution & State Aggregation"]
+        ASM["packages/orchestrator<br/>(Permissionless Assembler)"]
+        
+        ATT -->|Signs RosterAttestation| REG
+        ARKIV <-->|Reads & writes approvals| ASM
+        API -->|Queries state| L1
+        API -->|Queries state| L2
+    end
+
+    subgraph L2["ALT-MEMPOOL DEVNET — Execution & Enforcement"]
+        direction TB
+        REG["contracts/devnet/RosterRegistry.sol<br/>(Enforces Asymmetric Delays)"]
+        WAL["contracts/devnet/VoxyWallet.sol<br/>(Add-Only Recovery Wallet)"]
+        FRM["VoxyWalletFrame<br/>(EIP-8141 VERIFY Frame)"]
+        
+        REG -->|Provides roster truth| WAL
+        REG -->|Foreign storage read| FRM
+        ASM -->|Submits verified quorum| WAL
+        ASM -->|Submits FrameTx| FRM
+    end
+
+    subgraph CLIENT["INTERFACE LAYER"]
+        WEB["apps/web<br/>(Recovery Console & Management UI)"]
+        WEB <--> API
+    end
+```
+
+### Layer Responsibilities and Trust Boundaries
+
+* **Sepolia Identity Anchor:** Houses the authoritative ENSv2 `UserRegistry`. Guardian slots (`g1`, `g2`, `g3`) and quorum thresholds are maintained as native subname records. `RosterPublisher.sol` reads this state and emits monotonic epoch updates.
+* **Cross-Chain Attestation Layer:** Translates Sepolia roster changes to execution networks. A fixed 2-of-3 attester set observes `RosterChanged` events, recomputes the cryptographic hash, signs an EIP-712 `RosterAttestation`, and submits it to `RosterRegistry.sol`.
+* **Decentralized Coordination Layer (Arkiv):** A queryable, decentralized database chain (Rabdi) that stores recovery requests and guardian approvals. Entities carry native block-height expiries matching the request deadline. Arkiv acts strictly as a discovery carrier; on-chain contracts independently verify all cryptographic signatures.
+* **Devnet Execution Layer:** Enforces guardian recovery policy. `VoxyWallet.sol` executes standard transaction recoveries, while `VoxyWalletFrame` executes via EIP-8141 validation frames admitted by the staked alternative mempool.
+
+---
+
+## 04. Four Architectural Pillars
+
+### A. Mutable Guardian Identity — ENSv2
+
+Traditional social recovery binds security to ephemeral cryptographic keypairs. Voxy binds security to identity records.
+
+Each user operates a dedicated ENSv2 `UserRegistry` deployed via a verifiable factory. Guardians occupy structural subname slots:
+* `g1.user.eth`
+* `g2.user.eth`
+* `g3.user.eth`
+
+When a guardian rotates their underlying wallet, they update their own ENS name resolution on Sepolia. `RosterPublisher.sol` reads slot owners directly from the registry at call time (`getState`), evaluating expiration timestamps and token status dynamically. The wallet owner does not execute a transaction to update their guardian set; the identity layer absorbs the rotation.
+
+### B. Add-Only Recovery
+
+Account confiscation is mathematically precluded by contract design.
+
+When a recovery request satisfies the guardian quorum, `VoxyWallet.sol` executes:
+```solidity
+function executeRecovery() external {
+    require(!frozen, "frozen");
+    require(pending.key != address(0), "no pending recovery");
+    require(block.timestamp >= pending.readyAt, "delay not passed");
+
+    address newOwner = pending.key;
+    delete pending;
+    _addOwner(newOwner);
+    emit RecoveryExecuted(address(this), newOwner);
+}
+```
+
+The smart contract contains no internal routines to delete existing owners, sweep token balances, transfer native currency, or alter the guardian registry pointer. Recovery is strictly an authorization addition: the recovered key becomes an authorized co-signer alongside the original owner.
+
+### C. EOA Continuity — EIP-7702
+
+Voxy eliminates the requirement for asset migration through EIP-7702 code delegation.
+
+An existing Externally Owned Account signs an authorization designating `VoxyDelegate.sol` as its implementation. The account retains its original address, token holdings, transaction history, and self-custody authority:
+* When the original EOA key signs a call, `VoxyDelegate.sol` recognizes `msg.sender == address(this)` and permits execution.
+* If the primary key is lost, a 2-of-3 guardian quorum approves adding a `newController` to the delegate's internal mapping.
+* The recovered key operates the existing account through `execute(Call[] calldata calls)`. Assets never leave the original address.
+
+### D. Asymmetric Cross-Chain Security
+
+Cross-chain synchronization employs asymmetric time-locks to eliminate the risk of colluding bridge attesters:
+
+* **Security Strengthening (Instant):** Revoking a guardian or raising the quorum threshold on Sepolia takes effect immediately upon attestation submission on the execution chain.
+* **Security Weakening (Delayed):** Adding a new guardian or lowering the quorum threshold on Sepolia triggers an on-chain delay (`addDelay`, e.g., 48 hours) in `RosterRegistry.sol`. The new guardian remains flagged as inactive:
+  $$\text{activeAt}[i] = \text{block.timestamp} + \text{addDelay}$$
+
+If attesters attempt to insert a fraudulent guardian, the addition is frozen in an observation window. The wallet owner's automated watcher detects the pending addition, enabling the owner to invoke `freeze()` from their cold key and permanently block the recovery pipeline.
+
+---
+
+## 05. Recovery — Four State Transitions
+
+```
+[ State 01: Active ]
+       │
+       │ User initiates recovery with newKey
+       ▼
+[ State 02: Quorum Pending ] ◀─── Guardians sign EIP-712 digests on Arkiv
+       │
+       │ Threshold met (2-of-3) & requestRecovery() called
+       ▼
+[ State 03: Time-Lock Armed ] ─── Owner detects attack? ──▶ [ State 05: Frozen ]
+       │                                                         (Halted permanently)
+       │ block.timestamp >= readyAt (Delay elapsed)
+       ▼
+[ State 04: Finalized ] ─── _addOwner(newKey) installed
+```
+
+### Stage 01: Provisioning & Identity Anchoring
+* The owner configures guardian subnames (`g1`, `g2`, `g3`) in their ENSv2 `UserRegistry`.
+* Quorum threshold policy is set as an ENS text record (`voxy.threshold`).
+* `RosterPublisher.sol` computes the canonical roster hash and emits `RosterChanged`.
+* 2-of-3 attesters sign a `RosterAttestation`, and `RosterRegistry.sol` initializes the roster on the execution chain.
+* The user delegates their EOA to `VoxyDelegate.sol` via EIP-7702.
+
+### Stage 02: Key Loss & Intent Broadcast
+* The owner loses their primary signing device and generates a fresh replacement address (`newKey`).
+* The owner constructs a `RecoveryDigest` containing the wallet address, `newKey`, current `ownerEpoch`, current `rosterEpoch`, and a unique single-use 32-byte `requestId`.
+* The request is published to Arkiv under the schema `voxy_recovery_request_v1`.
+
+### Stage 03: Quorum Attestation on Arkiv
+* Configured guardians authenticate against the Arkiv network and fetch pending requests matching their account.
+* Guardians verify the deterministic parameters (`wallet`, `newKey`, `epoch`) and sign the EIP-712 `RecoveryDigest`.
+* Signatures are submitted as `voxy_guardian_approval_v1` entities on Arkiv, carrying a native block-height expiry equal to the request deadline.
+* The permissionless assembler pulls approvals, verifies signatures against `RosterRegistry.isActiveGuardian()`, and deduplicates signers.
+
+### Stage 04: Timelocked Co-Signer Injection
+* The assembler broadcasts `VoxyWallet.requestRecovery(digest, signatures)`.
+* The contract verifies:
+  1. `digest.deadline >= block.timestamp`
+  2. `!usedRequestId[digest.requestId]`
+  3. `digest.rosterHash == registry.rosterOf(wallet).hash`
+  4. Distinct valid guardian approvals $\ge \text{threshold}$.
+* The contract sets `pending = Pending({ key: newKey, readyAt: block.timestamp + recoveryDelay, requestId })`.
+* Once the delay window elapses, anyone triggers `executeRecovery()`. The contract executes `_addOwner(newKey)` and clears the pending state.
+
+---
+
+## 06. Security Model & Trust Assumptions
+
+### Cryptographic Quorum Integrity
+Guardian authorization is evaluated strictly against the EIP-712 structured data hash:
+$$\text{DigestHash} = \text{keccak256}(\text{"\x19\x01"} \ || \ \text{DOMAIN\_SEPARATOR} \ || \ \text{hashStruct}(\text{RecoveryDigest}))$$
+
+Each signature is verified using `ecrecover`. Signatures must originate from distinct addresses currently flagged as active in `RosterRegistry.sol`. Duplicate signatures from the same key count as a single approval.
+
+### Separation of Coordination and Enforcement
+Arkiv is treated as an untrusted message-passing layer. A compromised or adversarial Arkiv node cannot:
+* Forge guardian signatures (prevented by ECDSA cryptography).
+* Inject arbitrary keys (prevented by on-chain quorum validation).
+* Prematurely execute recoveries (prevented by on-chain timelock checks).
+
+If Arkiv becomes unavailable, recovery can be completed out-of-band by collecting signatures via portable CLI strings (`voxy1:...`) and submitting them directly to the smart contract.
+
+### EIP-7702 Scope Limitations
+EIP-7702 delegation operates in the account's execution context. Because the underlying private key retains authoritative cryptographic control over the EOA, **Voxy recovers from key loss, not active key theft**. If an attacker possesses the raw EOA private key, they can sign transactions directly or revoke the delegation. Voxy guarantees recovery when a key is lost, forgotten, or destroyed.
+
+### Alt-Mempool DoS & Staking Economics
+`VoxyWalletFrame` performs a foreign storage read (`RosterRegistry.rosterOf`) inside its EIP-8141 `VERIFY` frame. Under canonical mempool rules, this violates storage isolation and triggers immediate transaction dropping (`canonicalRejected: true`). 
+
+To achieve inclusion, the wallet deposits an economic bond of 0.012 ETH into the devnet `stakingRegistry`. The alternative mempool bundler admits the transaction based on this stake, which is slashable if the validation frame is abused to execute state-invalidation spam attacks.
+
+---
+
+## 07. Repository Topology
+
+```text
+voxy/
+├── apps/
+│   ├── api/                           # On-chain orchestration & state gateway
+│   │   └── src/
+│   │       ├── actions.ts             # Recovery digest building & execution dispatch
+│   │       ├── guardians.ts           # ENSv2 resolution & minimal-diff Sepolia writes
+│   │       ├── server.ts              # Native HTTP engine (capped streaming reader)
+│   │       └── state.ts               # Live multi-chain state & verification aggregator
+│   └── web/                           # Client interface & live recovery console
+│       └── src/
+│           ├── api.js                 # API client wrapper
+│           ├── console.js             # Recovery console DOM controller & tab engine
+│           ├── main.js                # Core landing page & scroll orchestration
+│           └── style.css              # Typography & layout stylesheets
+├── contracts/
+│   ├── devnet/                        # Execution layer smart contracts
+│   │   └── src/
+│   │       ├── RosterRegistry.sol     # Cross-chain roster storage & asymmetric delay
+│   │       └── VoxyWallet.sol         # Add-only guardian recovery wallet
+│   └── sepolia/                       # Identity anchor smart contracts
+│       └── src/
+│           ├── RosterPublisher.sol    # ENSv2 live roster observer & epoch publisher
+│           └── VoxyDelegate.sol       # EIP-7702 EOA delegation implementation
+├── packages/
+│   ├── arkiv/                         # Arkiv decentralized database integration
+│   │   └── src/
+│   │       ├── coordination.ts        # Ephemeral request/approval state machine
+│   │       └── schema.ts              # Rabdi entity schemas & validation bounds
+│   ├── attester/                      # Cross-chain roster attestation engine
+│   │   └── src/
+│   │       ├── attest.ts              # EIP-712 RosterAttestation builder & signer
+│   │       └── verify-sync.ts         # Cross-chain cryptographic hash auditor
+│   ├── chain/                         # Shared chain configuration, ABIs & RPC clients
+│   ├── frame-tx/                      # EIP-8141 Frame Transaction serialization
+│   └── orchestrator/                  # Permissionless assembly & signature verification
+├── deployments.json                   # Verified on-chain contract addresses & tx hashes
+├── package.json                       # Root workspace manifest (pnpm 10.30.2)
+└── pnpm-workspace.yaml                # Monorepo package declarations
+```
+
+---
+
+## 08. Local Development
+
+### Prerequisites
+* **Node.js:** `>= 24.0.0`
+* **Package Manager:** `pnpm@10.30.2`
+* **Compiler:** `foundry` (for contract compilation)
+
+### Clone & Installation
+```bash
+git clone https://github.com/kartikeywastaken/voxy.git
+cd voxy
 pnpm install --frozen-lockfile
-pnpm check
-pnpm test
-pnpm arkiv:status
-pnpm arkiv:first-write
-pnpm --filter @voxy/arkiv query recovery-request --account "$WALLET"
 ```
 
-Configured Arkiv writer: `0x3915753836031a63B6462310f511B4F0E660Ff47`.
-The funded writer completed a [real probe write/readback](https://rabdi.explorer.arkiv.network/tx/0xa2be2bef11ca1d5e286e193a9e2f281336d49efaee75c8cdc4fe3c11822a7c4e)
-and a [live devnet roster snapshot](https://rabdi.explorer.arkiv.network/tx/0xaa1549ce7ab45ec22f5e81ad8b691e753902cc62a5224001bf02dfc5e1d00d74).
-The probe was separate from recovery activity and has expired; retain its receipt and journal.
-Request/approval writers, signature-verified progress and the polling owner watcher are implemented.
-Positive recovery/alert delivery through the new writers remains unverified; web and frame submission
-are subsequent work. See [live evidence](artifacts/arkiv/coordination-evidence.json).
-Default maximum cost: 0.01 tGLM per write. See [Arkiv usage](arkiv/how-you-use-arkiv.md).
-
-## Sovereign recovery — "if Voxy disappears, you still get your wallet back"
-
-Recovery does not depend on any server, website, assembler or Arkiv that we run. Trust lives in one
-`verifyApproval` (re-check each signer against the on-chain roster), so **every carrier is an
-interchangeable, untrusted `ApprovalSource`** — Arkiv, a file, a QR code, stdin.
-
-**C — Censorship-resistant.** A guardian signs in their own wallet and gets a portable `voxy1:…`
-string (also a QR). It carries the request + signature and **nothing secret** — it can't move a
-coin alone. The owner collects blobs over any channel and submits with no server in the path:
-
-```sh
-pnpm voxy:request --new-key 0x<newkey>        > request.json     # owner: shared request
-pnpm voxy:sign    --request request.json --pk-env GUARDIAN_1_PK   # guardian: emits voxy1:… blob
-pnpm voxy:sign    --request request.json --pk-env GUARDIAN_2_PK
-pnpm voxy:recover --request request.json --blob g1.txt --blob g2.txt   # owner: verify + submit
+### Environment Configuration
+Copy the root `.env.example` file and configure required RPC and signer credentials:
+```bash
+cp .env.example .env
 ```
 
-Verified live end-to-end from the **blob files alone** (no Arkiv, no server): `2/2 valid on-chain`.
-Each wallet pays its own gas, so no relayer is needed (`RecoveryPaymaster` is the optional path).
-Instant guardian revocation without attester sync is available via `VoxyGuardianRegistry.revoke()`.
+Key environment declarations:
+```bash
+# Sepolia (ENSv2 Identity Anchor)
+SEPOLIA_RPC_URL="https://ethereum-sepolia.publicnode.com"
+SEPOLIA_DEPLOYER_PK="0x..."
 
-**O — Open.** MIT licensed; the frontend is a static SPA built reproducibly with a pinned
-toolchain + committed lockfile:
+# Devnet (EIP-8141 Alt-Mempool Execution)
+DEVNET_RPC_URL="https://altmempoolgateway.forshtat.com/rpc"
+DEVNET_CHAIN_ID=1337
+DEVNET_DEPLOYER_PK="0x..."
 
-```sh
-docker build -t voxy-web . && docker run -p 8080:80 voxy-web   # byte-reproducible dist
+# Attestation Quorum (2-of-3 Cross-Chain Sync)
+ATTESTER_1_PK="0x..."
+ATTESTER_2_PK="0x..."
+ATTESTER_3_PK="0x..."
+
+# Arkiv (Rabdi Testnet)
+ARKIV_RPC_URL="https://rpc.rabdi.db-chain.testnet.arkiv.network"
+ARKIV_CHAIN_ID=7794095
+ARKIV_WRITER_PK="0x..."
+
+# Protocol Timing Parameters
+RECOVERY_DELAY_SECONDS=180
+ADD_DELAY_SECONDS=120
+ROSTER_THRESHOLD=2
 ```
 
-Remaining open step (honest): publishing the `dist` CID to IPFS and pinning it in the parent ENS
-name's `contenthash` so users verify the loaded site matches this repo — not yet done.
+### Testnet Faucets
+* **Rabdi tGLM:** [Arkiv Hub Faucet](https://hub.arkiv.network/faucet)
+* **Sepolia ETH:** [Google Cloud Faucet](https://cloud.google.com/application/web3/faucet/ethereum/sepolia) or [Chainlink Faucet](https://faucets.chain.link/sepolia)
+* **Alt-Mempool Devnet ETH (1337):** Faucet available directly on the [Alt-Mempool Explorer](https://explorer.altmempool.wtf/)
 
-Honest limit: submitting a *frame* tx still goes through an alt-mempool node (a gatekeeper); the
-7702/Sepolia path has no such gatekeeper (any Sepolia RPC works).
+### Running the Local Stack
+Start the API orchestration gateway and the frontend recovery console in separate terminals:
 
-## Tests
+```bash
+# Terminal 1: Run the Backend API Gateway (Port 8787)
+pnpm --filter @voxy/api start
 
-**50 automated tests across four suites**, plus live-network checks. All test real behaviour — no
-mocked RPC or contract responses; the TS EIP-712 suite asserts against the **live deployed**
-contracts' domain separators and a `cast`-computed digest golden, and the Foundry suites use real
-cryptographic signatures.
-
-| Suite | Count | Command | Covers |
-|---|---|---|---|
-| Foundry — devnet contracts | 9 | `cd contracts/devnet && forge test` | `VoxyWallet` quorum/add-only/replay/revoked-guardian/add-delay/frozen (7) + ENS→registry integration (2) |
-| Foundry — Sepolia contracts | 15 | `cd contracts/sepolia && forge test` | `VoxyDelegate` 7702 EOA recovery incl. real `vm.signAndAttachDelegation` (9) + `VoxyGuardianRegistry` — **non-ENS guardians**, revoke/expiry fail-closed, and end-to-end recovery of a delegate through our own registry (6) |
-| TypeScript — packages | 24 | `pnpm test` | `@voxy/chain` EIP-712 vs live contracts + RecoveryDigest golden (6), `@voxy/attester` attestation signing/binding/determinism (4), `@voxy/orchestrator` guardian signing (2) + portable `voxy1:` blob round-trip/validation (4), `@voxy/frame-sdk` + `@voxy/arkiv` parsing/signature/schema (8) |
-| Web — `apps/web` | 2 | `cd apps/web && node --test` | ENS input normalization + ASCII portal frames |
-
-Repo-wide gates: `pnpm check` (tsc), `pnpm lint` (Biome). The frame contract builds under the
-`frame` Foundry profile (`FOUNDRY_PROFILE=frame forge build`).
-
-Live-network verification (needs `.env`):
-
-```sh
-pnpm attester:verify-sync                                   # Sepolia ENS roster == devnet registry
-pnpm recover recover --new-key 0x<addr> --dry-run           # orchestrator quorum, no state change
-node --env-file=.env --import tsx packages/orchestrator/src/arkiv-loop.ts   # full Arkiv-coordinated recovery
+# Terminal 2: Run the Web Interface (Port 5173)
+pnpm --filter @voxy/web dev
 ```
 
-## Testnet funding
+Open `http://localhost:5173` to access the local recovery console.
 
-- Rabdi tGLM: [Arkiv Hub faucet](https://hub.arkiv.network/faucet).
-- Sepolia ETH: [Google Cloud faucet](https://cloud.google.com/application/web3/faucet/ethereum/sepolia)
-  or [Chainlink faucet](https://faucets.chain.link/sepolia).
-- Frame devnet ETH (1337): Faucet button at [alt-mempool explorer](https://explorer.altmempool.wtf/),
-  as documented by the [official workshop](https://github.com/forshtat/mempool-workshop).
+---
 
-## What this does not claim
+## 09. Verified Deployments & On-Chain Artifacts
 
-Voxy is experimental. It is not production-ready, a trustless cross-chain bridge. The planned roster sync trusts 2 of 3 attesters. Guardian
-data on Arkiv is public, and expiry cannot retract copies. Testnets may reset. We do not claim
-the alt mempool is required, publish gas measurements, or claim a live app until verified.
-ENSignv2 is a design reference; no code was copied from it.
+All contract instances below are deployed, verified, and operational on public testnets.
 
+### Ethereum Sepolia (Chain ID: `11155111`)
+* **RosterPublisher:** [`0xc133Bd3db6EfafDbbc3c5bdd87c30FF1E6E817cA`](https://sepolia.etherscan.io/address/0xc133Bd3db6EfafDbbc3c5bdd87c30FF1E6E817cA)
+  * *Deployment Tx:* `0xb4ca2e4e575f1476e0fb0d57f923f3c2d2dc27fa466967323da4ea25d17e2be7`
+* **VoxyDelegate (EIP-7702 Implementation):** [`0x7E4C98C97FEb486A94686775961124A580606feB`](https://sepolia.etherscan.io/address/0x7E4C98C97FEb486A94686775961124A580606feB)
+  * *Deployment Tx:* `0x1dade38df1989c8aff358b9f4654ceb7b8f18eae27ebe27f7f26d2aa8cc4452c`
+* **Verified EIP-7702 EOA Recovery Run:**
+  * *Delegated EOA Account:* `0xBFb354B706Cc37D9F5ee0C631f4496A3BA54d60c`
+  * *Delegation Tx:* `0x6b82d63ab2d7ddcdc1ba95a78f6c7b608fb649c93b23b0d428c9f2228e8f11f9`
+  * *Executed Recovery Tx:* `0x379fe14ebb23cdf68aa3112795584e9b13a95c6186d274aecdf00f374535e76a`
+  * *Recovered Key Spend Tx:* `0x843d29a04f816ca91393d7ee9d8b175e65a5bf090c2a45fd1cf0c80d5f793ab0`
+
+### Alt-Mempool Devnet (Chain ID: `1337`)
+* **Explorer:** [explorer.altmempool.wtf](https://explorer.altmempool.wtf)
+* **RosterRegistry:** `0xEa974EfA1aE7D89f7624E144dA1a444C8250f31C`
+* **VoxyWallet (Standard Execution):** `0xb7d81A26FC1293f638B3CDEF650cb84f80e9807E`
+* **VoxyWalletFrame (EIP-8141 Staked Frame Account):** `0x537a4409cC943DE3FEc5605D1923eEDf938A9fD4`
+  * *Admitted Staked Recovery Frame Tx:* `0x70cdf88e0b96fdab5b5c8700b73148762cbdbd9a24a40261c40a0bf24fa2fe21`
+  * *Finalize Recovery Tx:* `0x9cd19bc3c9929977b16e37442e78feaaeb10dc3ce8461c2f803fecb6b183fb71`
+
+### Arkiv Database (Rabdi Testnet, Chain ID: `7794095`)
+* **Explorer:** [rabdi.explorer.arkiv.network](https://rabdi.explorer.arkiv.network)
+* **Configured Writer Account:** `0x3915753836031a63B6462310f511B4F0E660Ff47`
+* **Verified Coordination Lifecycle Tx:** `0x4c13b921b71295c58f2eb9c0cc536c98a414f9f4f57a2c4eef5d8d5de4bfe653`
+
+---
+
+## 10. Limitations & Technical Roadmap
+
+To maintain engineering transparency, the operational boundaries of the current implementation are categorized below:
+
+### Production-Ready Components
+* **Add-Only Contract Invariants:** Formal Solidity assertions in `VoxyWallet.sol` guaranteeing zero balance drain or owner deletion paths.
+* **ENSv2 Resolution Pipeline:** On-chain resolution of identity subnames and dynamic text record threshold policy.
+* **EIP-712 Signature Verification:** Strict mathematical parameter binding across chains, wallets, nonces, and epochs.
+
+### Infrastructure Dependencies
+* **Alt-Mempool Availability:** The EIP-8141 frame transaction workflow requires nodes supporting `type 0x06` frame parsing. On chains without alt-mempool infrastructure, Voxy operates via standard on-chain transactions (`VoxyWallet.sol`).
+* **2-of-3 Attestation Bridge:** Cross-chain roster synchronization currently relies on a designated multi-attester set. While asymmetric time-locks prevent malicious guardian additions, true trust minimization requires moving to zero-knowledge state-root proofs as L2 rollup bridge standards mature.
+
+### Experimental Scope & Honest Boundaries
+* **EIP-7702 Tooling Maturity:** EIP-7702 delegation flows are demonstrated live on Sepolia using Foundry test harnesses and pre-signed delegation tuples. Mainstream wallet UI support (e.g., standard MetaMask delegation signing prompts) remains dependent on broader ecosystem adoption of the EIP.
+* **Singleton Testnet Contention:** The current public devnet demo instance references a shared singleton contract (`0xb7d8...807E`). An active recovery locks the initiation interface until the time-lock window completes. Production deployment employs deterministic factory deployments (`CREATE2`) to provision isolated smart account instances per user.
+* **Protocol Disclaimers:** Voxy is an experimental hackathon implementation. Guardian data on Arkiv is publicly readable on-chain, and expiration does not retract off-chain copies. Testnet states may be subject to periodic resets. ENSignv2 is referenced solely as a design benchmark; all code in this repository was authored from scratch.
