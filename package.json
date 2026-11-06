@@ -23,7 +23,10 @@
     "bootstrap": "tsx scripts/bootstrap.ts",
     "demo": "tsx scripts/demo.ts",
     "attacks": "tsx scripts/attacks.ts",
-    "measure": "tsx scripts/measure.ts"
+    "measure": "tsx scripts/measure.ts",
+    "voxy:request": "node --env-file=.env --import tsx packages/orchestrator/src/sovereign-cli.ts request",
+    "voxy:sign": "node --env-file=.env --import tsx packages/orchestrator/src/sovereign-cli.ts sign",
+    "voxy:recover": "node --env-file=.env --import tsx packages/orchestrator/src/sovereign-cli.ts recover"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.0",

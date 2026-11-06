@@ -1,0 +1,10 @@
+**/node_modules
+**/dist
+**/out
+**/out-frame
+**/cache
+**/.voxy
+.env
+.env.*
+.git
+reference

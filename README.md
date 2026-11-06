@@ -42,9 +42,43 @@ Positive recovery/alert delivery through the new writers remains unverified; web
 are subsequent work. See [live evidence](artifacts/arkiv/coordination-evidence.json).
 Default maximum cost: 0.01 tGLM per write. See [Arkiv usage](arkiv/how-you-use-arkiv.md).
 
+## Sovereign recovery — "if Voxy disappears, you still get your wallet back"
+
+Recovery does not depend on any server, website, assembler or Arkiv that we run. Trust lives in one
+`verifyApproval` (re-check each signer against the on-chain roster), so **every carrier is an
+interchangeable, untrusted `ApprovalSource`** — Arkiv, a file, a QR code, stdin.
+
+**C — Censorship-resistant.** A guardian signs in their own wallet and gets a portable `voxy1:…`
+string (also a QR). It carries the request + signature and **nothing secret** — it can't move a
+coin alone. The owner collects blobs over any channel and submits with no server in the path:
+
+```sh
+pnpm voxy:request --new-key 0x<newkey>        > request.json     # owner: shared request
+pnpm voxy:sign    --request request.json --pk-env GUARDIAN_1_PK   # guardian: emits voxy1:… blob
+pnpm voxy:sign    --request request.json --pk-env GUARDIAN_2_PK
+pnpm voxy:recover --request request.json --blob g1.txt --blob g2.txt   # owner: verify + submit
+```
+
+Verified live end-to-end from the **blob files alone** (no Arkiv, no server): `2/2 valid on-chain`.
+Each wallet pays its own gas, so no relayer is needed (`RecoveryPaymaster` is the optional path).
+Instant guardian revocation without attester sync is available via `VoxyGuardianRegistry.revoke()`.
+
+**O — Open.** MIT licensed; the frontend is a static SPA built reproducibly with a pinned
+toolchain + committed lockfile:
+
+```sh
+docker build -t voxy-web . && docker run -p 8080:80 voxy-web   # byte-reproducible dist
+```
+
+Remaining open step (honest): publishing the `dist` CID to IPFS and pinning it in the parent ENS
+name's `contenthash` so users verify the loaded site matches this repo — not yet done.
+
+Honest limit: submitting a *frame* tx still goes through an alt-mempool node (a gatekeeper); the
+7702/Sepolia path has no such gatekeeper (any Sepolia RPC works).
+
 ## Tests
 
-**46 automated tests across four suites**, plus live-network checks. All test real behaviour — no
+**50 automated tests across four suites**, plus live-network checks. All test real behaviour — no
 mocked RPC or contract responses; the TS EIP-712 suite asserts against the **live deployed**
 contracts' domain separators and a `cast`-computed digest golden, and the Foundry suites use real
 cryptographic signatures.
@@ -53,7 +87,7 @@ cryptographic signatures.
 |---|---|---|---|
 | Foundry — devnet contracts | 9 | `cd contracts/devnet && forge test` | `VoxyWallet` quorum/add-only/replay/revoked-guardian/add-delay/frozen (7) + ENS→registry integration (2) |
 | Foundry — Sepolia contracts | 15 | `cd contracts/sepolia && forge test` | `VoxyDelegate` 7702 EOA recovery incl. real `vm.signAndAttachDelegation` (9) + `VoxyGuardianRegistry` — **non-ENS guardians**, revoke/expiry fail-closed, and end-to-end recovery of a delegate through our own registry (6) |
-| TypeScript — packages | 20 | `pnpm test` | `@voxy/chain` EIP-712 vs live contracts + RecoveryDigest golden (6), `@voxy/attester` attestation signing/binding/determinism (4), `@voxy/orchestrator` guardian signing/binding (2), `@voxy/frame-sdk` + `@voxy/arkiv` parsing/signature/schema (8) |
+| TypeScript — packages | 24 | `pnpm test` | `@voxy/chain` EIP-712 vs live contracts + RecoveryDigest golden (6), `@voxy/attester` attestation signing/binding/determinism (4), `@voxy/orchestrator` guardian signing (2) + portable `voxy1:` blob round-trip/validation (4), `@voxy/frame-sdk` + `@voxy/arkiv` parsing/signature/schema (8) |
 | Web — `apps/web` | 2 | `cd apps/web && node --test` | ENS input normalization + ASCII portal frames |
 
 Repo-wide gates: `pnpm check` (tsc), `pnpm lint` (Biome). The frame contract builds under the
