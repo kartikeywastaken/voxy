@@ -33,6 +33,33 @@ importers:
         specifier: ^2.38.0
         version: 2.57.16(typescript@5.9.3)
 
+  packages/attester:
+    dependencies:
+      '@voxy/chain':
+        specifier: workspace:*
+        version: link:../chain
+      viem:
+        specifier: ^2.38.0
+        version: 2.57.16(typescript@5.9.3)
+
+  packages/chain:
+    dependencies:
+      viem:
+        specifier: ^2.38.0
+        version: 2.57.16(typescript@5.9.3)
+
+  packages/orchestrator:
+    dependencies:
+      '@voxy/arkiv':
+        specifier: workspace:*
+        version: link:../arkiv
+      '@voxy/chain':
+        specifier: workspace:*
+        version: link:../chain
+      viem:
+        specifier: ^2.38.0
+        version: 2.57.16(typescript@5.9.3)
+
 packages:
 
   '@adraffy/ens-normalize@1.11.1':

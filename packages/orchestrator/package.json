@@ -1,0 +1,12 @@
+{
+  "name": "@voxy/orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@voxy/chain": "workspace:*",
+    "@voxy/arkiv": "workspace:*",
+    "viem": "^2.38.0"
+  }
+}
