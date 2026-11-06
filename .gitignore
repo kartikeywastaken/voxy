@@ -1,5 +1,7 @@
 reference/
 node_modules/
+.pnpm-store/
+.voxy/
 out/
 cache/
 broadcast/

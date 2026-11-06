@@ -4,11 +4,27 @@
   "version": "0.1.0",
   "license": "MIT",
   "packageManager": "pnpm@10.30.2",
-  "workspaces": ["packages/*", "apps/*"],
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
+    "check": "tsc --noEmit",
+    "lint": "biome check .",
+    "test": "tsx --test packages/*/src/*.test.ts",
+    "arkiv:status": "node --env-file=.env --import tsx packages/arkiv/src/cli.ts status",
+    "arkiv:first-write": "node --env-file=.env --import tsx packages/arkiv/src/cli.ts first-write",
+    "arkiv:query": "node --env-file=.env --import tsx packages/arkiv/src/cli.ts query",
     "bootstrap": "tsx scripts/bootstrap.ts",
     "demo": "tsx scripts/demo.ts",
     "attacks": "tsx scripts/attacks.ts",
     "measure": "tsx scripts/measure.ts"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.0",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "viem": "^2.38.0"
   }
 }
