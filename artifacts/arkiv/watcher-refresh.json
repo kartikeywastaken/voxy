@@ -1,0 +1,13 @@
+{
+  "wallet": "0xb7d81A26FC1293f638B3CDEF650cb84f80e9807E",
+  "events": [
+    {
+      "kind": "watch-status",
+      "healthy": true,
+      "complete": true,
+      "invalid": 0,
+      "arkivBlock": "282946"
+    }
+  ],
+  "scope": "One real fresh-state Arkiv polling cycle. This does not prove alert delivery or end-to-end recovery."
+}

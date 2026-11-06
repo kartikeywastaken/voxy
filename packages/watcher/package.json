@@ -1,0 +1,11 @@
+{
+  "name": "@voxy/watcher",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@voxy/arkiv": "workspace:*",
+    "@voxy/frame-sdk": "workspace:*"
+  }
+}

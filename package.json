@@ -19,6 +19,7 @@
     "attester:verify-sync": "node --env-file=.env --import tsx packages/attester/src/cli.ts verify-sync",
     "attester:sync": "node --env-file=.env --import tsx packages/attester/src/cli.ts sync",
     "recover": "node --env-file=.env --import tsx packages/orchestrator/src/cli.ts",
+    "watcher": "node --env-file=.env --import tsx packages/watcher/src/cli.ts",
     "bootstrap": "tsx scripts/bootstrap.ts",
     "demo": "tsx scripts/demo.ts",
     "attacks": "tsx scripts/attacks.ts",
