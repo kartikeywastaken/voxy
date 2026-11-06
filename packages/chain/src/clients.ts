@@ -4,16 +4,36 @@ import {
   createPublicClient,
   createWalletClient,
   defineChain,
+  fallback,
   http,
+  type Transport,
 } from "viem";
 import { loadDeployments } from "./deployments.js";
 
 /**
  * viem chain + client factories for the two EVM chains the backend drives. RPC URLs come from
  * deployments.json (overridable by env), never hardcoded in callers.
+ *
+ * Hardening: public RPCs (e.g. publicnode) lag and drop requests, which bit the live flows. Every
+ * transport here retries, times out, and supports a comma-separated list of URLs with automatic
+ * failover, so a single flaky endpoint can't fail the pipeline.
  */
 
 const d = loadDeployments();
+
+/** Build a resilient transport from one or more comma-separated RPC URLs. */
+function transportFor(urls: string): Transport {
+  const [first, ...rest] = urls
+    .split(",")
+    .map((u) => u.trim())
+    .filter(Boolean)
+    .map((u) => http(u, { retryCount: 4, retryDelay: 400, timeout: 20_000 }));
+  if (!first) throw new Error("No RPC URL configured");
+  return rest.length > 0 ? fallback([first, ...rest], { retryCount: 1 }) : first;
+}
+
+const sepoliaTransport = () => transportFor(process.env.SEPOLIA_RPC_URL || d.sepolia.rpc);
+const devnetTransport = () => transportFor(process.env.DEVNET_RPC_URL || d.devnet.rpc);
 
 export const sepolia: Chain = defineChain({
   id: d.sepolia.chainId,
@@ -32,18 +52,17 @@ export const devnet: Chain = defineChain({
 });
 
 export function sepoliaReader() {
-  return createPublicClient({ chain: sepolia, transport: http() });
+  return createPublicClient({ chain: sepolia, transport: sepoliaTransport() });
 }
 
 export function devnetReader() {
-  return createPublicClient({ chain: devnet, transport: http() });
+  return createPublicClient({ chain: devnet, transport: devnetTransport() });
 }
 
 export function devnetWallet(account: Account) {
-  // --legacy equivalent: the devnet rejected EIP-1559 fields in earlier testing.
-  return createWalletClient({ chain: devnet, transport: http(), account });
+  return createWalletClient({ chain: devnet, transport: devnetTransport(), account });
 }
 
 export function sepoliaWallet(account: Account) {
-  return createWalletClient({ chain: sepolia, transport: http(), account });
+  return createWalletClient({ chain: sepolia, transport: sepoliaTransport(), account });
 }

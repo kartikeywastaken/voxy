@@ -69,6 +69,17 @@
     "chainId": 7794095,
     "rpc": "https://rpc.rabdi.db-chain.testnet.arkiv.network",
     "explorer": "https://rabdi.explorer.arkiv.network",
-    "writer": "0x3915753836031a63B6462310f511B4F0E660Ff47"
+    "writer": "0x3915753836031a63B6462310f511B4F0E660Ff47",
+    "coordinationLoop": {
+      "requestId": "0x7bbd369f367c2c9224c4de7082020cda4c9241c990aa556138aa93002e47d8c3",
+      "requestEntity": "0x15ec84553820336e4165ae4f607db580760cb488a2b96c6792f2f983fb66a70a",
+      "requestTx": "0x4c13b921b71295c58f2eb9c0cc536c98a414f9f4f57a2c4eef5d8d5de4bfe653",
+      "approvalEntities": [
+        "0xf134042b98d2252a299c8238cd1a83e0d290c811a6c0e4614839a128784e73de",
+        "0xf1a42fb2f00cf1ed9c816e1ddc32897f86af04126cc926f803d6d26ffae09651"
+      ],
+      "onchainRequestRecoveryTx": "0xef55c201a42a11cdbc7186f82628d0986cd25024b97142f148097466e1239b5a",
+      "note": "Load-bearing Arkiv loop: recovery-request + 2 guardian approvals written to Rabdi, signatures read BACK from Arkiv, quorum re-verified on-chain (2/2), and requestRecovery submitted to the devnet VoxyWallet assembled only from Arkiv-sourced signatures (armed pending key 0x3333...). Demo relays approvals via the funded writer; production has each guardian own its approval entity."
+    }
   }
 }

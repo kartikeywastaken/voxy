@@ -102,6 +102,9 @@ importers:
 
   packages/orchestrator:
     dependencies:
+      '@arkiv-network/sdk':
+        specifier: 1.0.1
+        version: 1.0.1(typescript@5.9.3)(viem@2.57.16(typescript@5.9.3))
       '@voxy/arkiv':
         specifier: workspace:*
         version: link:../arkiv

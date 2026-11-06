@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type Address, hashDomain } from "viem";
-import { hashRoster, registryDomain, walletDomain } from "./eip712.js";
+import { type Address, hashDomain, hashTypedData } from "viem";
+import {
+  hashRoster,
+  type RecoveryDigest,
+  recoveryDigestTypedData,
+  registryDomain,
+  walletDomain,
+} from "./eip712.js";
 
 const EIP712DOMAIN_TYPE = {
   EIP712Domain: [
@@ -48,4 +54,43 @@ test("registry EIP-712 domain separator matches the live deployed RosterRegistry
 test("roster hash is order-sensitive (guardian slots are positional)", () => {
   const swapped: [Address, Address, Address] = [GUARDIANS[1], GUARDIANS[0], GUARDIANS[2]];
   assert.notEqual(hashRoster(swapped, 2), ROSTER_HASH);
+});
+
+// Full EIP-712 RecoveryDigest hash (0x1901 || domainSep || structHash), computed independently
+// with `cast` against the live VoxyWallet domain. This is the exact digest guardians sign and the
+// contract recomputes — the most security-critical hash in the system.
+const RECOVERY_DIGEST_GOLDEN = "0x42899ecdead4d2837cd1e40b33b18b10e9c79ecbf47a9f5981c1dfc66c1612a1";
+
+const SAMPLE_RECOVERY: RecoveryDigest = {
+  chainId: 1337n,
+  wallet: WALLET,
+  newKey: "0x1111111111111111111111111111111111111111",
+  ownerEpoch: 1n,
+  rosterEpoch: 1n,
+  rosterHash: ROSTER_HASH,
+  deadline: 2000000000n,
+  requestId: "0x0000000000000000000000000000000000000000000000000000000000000001",
+  callHash: "0x0000000000000000000000000000000000000000000000000000000000000000",
+};
+
+test("full RecoveryDigest EIP-712 hash matches the cast golden (the digest guardians sign)", () => {
+  const typed = recoveryDigestTypedData(1337, WALLET, SAMPLE_RECOVERY);
+  assert.equal(hashTypedData(typed), RECOVERY_DIGEST_GOLDEN);
+});
+
+test("any changed recovery field changes the digest (binding holds)", () => {
+  const base = hashTypedData(recoveryDigestTypedData(1337, WALLET, SAMPLE_RECOVERY));
+  const mutations: Partial<RecoveryDigest>[] = [
+    { newKey: "0x2222222222222222222222222222222222222222" },
+    { ownerEpoch: 2n },
+    { rosterEpoch: 2n },
+    { deadline: 2000000001n },
+    { requestId: "0x0000000000000000000000000000000000000000000000000000000000000002" },
+  ];
+  for (const m of mutations) {
+    const mutated = hashTypedData(
+      recoveryDigestTypedData(1337, WALLET, { ...SAMPLE_RECOVERY, ...m }),
+    );
+    assert.notEqual(mutated, base);
+  }
 });

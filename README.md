@@ -3,9 +3,20 @@
 Wallet recovery using an ENSv2 guardian namespace, with approvals coordinated on Arkiv and
 cross-chain revocation from Sepolia to an EIP-8141 devnet. Design: [project bible](final_project_bible.md).
 
-This is the `aak` coordination branch. Claude integrates the chain contracts and attesters.
-Implementation status and contract handoff issues are in [CODEX_HANDOFF.md](docs/CODEX_HANDOFF.md).
-No end-to-end recovery or admitted frame transaction is claimed on this branch yet.
+## Status (live on testnets, verified on-chain)
+
+| Layer | What runs | Evidence |
+|---|---|---|
+| ENSv2 identity (Sepolia) | guardian roster read live, expiry-aware | `RosterPublisher` `0xc133Bd3d…17cA` |
+| Cross-chain sync | 2-of-3 attested roster → devnet registry | `verify-sync` returns `match: true` |
+| Recovery, ordinary tx (devnet) | guardian quorum, add-only, 180s delay | `VoxyWallet` `0xb7d8…807E`, ran live |
+| Recovery, **EIP-8141 VERIFY frame** (devnet) | quorum in validation via `sigparam`, staked alt-mempool admits, canonical rejects | `VoxyWalletFrame` `0x537a…9fD4`, admitted frame tx `0x70cdf88e…` |
+| Recovery of an **existing EOA via EIP-7702** (Sepolia) | one signature, funds/address untouched, ENS guardians recover | `VoxyDelegate` `0x7E4C…06feB`, recover tx `0x379fe14e…` |
+| Arkiv coordination (Rabdi) | request → approve → assemble, signatures read back and submitted on-chain | loop tx `0xef55c201…` |
+
+Exact addresses and tx hashes: [`deployments.json`](deployments.json). Backend walkthrough: [`docs/BACKEND.md`](docs/BACKEND.md).
+
+Honest limits: the frame/alt-mempool path is **devnet-only** (EIP-8141 is experimental); 7702 recovers key **loss, not theft**; the roster sync trusts **2 of 3 attesters**; we do not claim production-readiness or that we are the first ENS/social-recovery system.
 
 ## Run the Arkiv package
 
@@ -30,6 +41,31 @@ Request/approval writers, signature-verified progress and the polling owner watc
 Positive recovery/alert delivery through the new writers remains unverified; web and frame submission
 are subsequent work. See [live evidence](artifacts/arkiv/coordination-evidence.json).
 Default maximum cost: 0.01 tGLM per write. See [Arkiv usage](arkiv/how-you-use-arkiv.md).
+
+## Tests
+
+**40 automated tests across four suites**, plus live-network checks. All test real behaviour — no
+mocked RPC or contract responses; the TS EIP-712 suite asserts against the **live deployed**
+contracts' domain separators and a `cast`-computed digest golden, and the Foundry suites use real
+cryptographic signatures.
+
+| Suite | Count | Command | Covers |
+|---|---|---|---|
+| Foundry — devnet contracts | 9 | `cd contracts/devnet && forge test` | `VoxyWallet` quorum/add-only/replay/revoked-guardian/add-delay/frozen (7) + ENS→registry integration (2) |
+| Foundry — Sepolia contracts | 9 | `cd contracts/sepolia && forge test` | `VoxyDelegate` 7702 EOA recovery: quorum, add-only, execute-by-controller, replay, frozen, **real `vm.signAndAttachDelegation` 7702 test** |
+| TypeScript — packages | 20 | `pnpm test` | `@voxy/chain` EIP-712 vs live contracts + RecoveryDigest golden (6), `@voxy/attester` attestation signing/binding/determinism (4), `@voxy/orchestrator` guardian signing/binding (2), `@voxy/frame-sdk` + `@voxy/arkiv` parsing/signature/schema (8) |
+| Web — `apps/web` | 2 | `cd apps/web && node --test` | ENS input normalization + ASCII portal frames |
+
+Repo-wide gates: `pnpm check` (tsc), `pnpm lint` (Biome). The frame contract builds under the
+`frame` Foundry profile (`FOUNDRY_PROFILE=frame forge build`).
+
+Live-network verification (needs `.env`):
+
+```sh
+pnpm attester:verify-sync                                   # Sepolia ENS roster == devnet registry
+pnpm recover recover --new-key 0x<addr> --dry-run           # orchestrator quorum, no state change
+node --env-file=.env --import tsx packages/orchestrator/src/arkiv-loop.ts   # full Arkiv-coordinated recovery
+```
 
 ## Testnet funding
 

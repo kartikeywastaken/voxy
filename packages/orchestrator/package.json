@@ -7,6 +7,7 @@
   "dependencies": {
     "@voxy/chain": "workspace:*",
     "@voxy/arkiv": "workspace:*",
-    "viem": "^2.38.0"
+    "viem": "^2.38.0",
+    "@arkiv-network/sdk": "1.0.1"
   }
 }
