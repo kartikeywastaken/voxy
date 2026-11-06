@@ -1,0 +1,16 @@
+{
+  "network": "rabdi",
+  "chainId": 7794095,
+  "writerBalanceCheck": {
+    "blockNumber": "279330",
+    "blockTimestamp": "1793944424",
+    "writer": "0x3915753836031a63B6462310f511B4F0E660Ff47",
+    "balanceWei": "0",
+    "symbol": "tGLM"
+  },
+  "requestQuery": {
+    "account": "0x3915753836031a63B6462310f511B4F0E660Ff47",
+    "result": { "entities": [], "blockNumber": "279393", "skipped": 0 }
+  },
+  "writeReadback": "blocked: writer has no tGLM; no transaction broadcast"
+}

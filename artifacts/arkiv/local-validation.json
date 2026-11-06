@@ -1,0 +1,22 @@
+{
+  "environment": "isolated-local-anvil",
+  "chainId": 31337,
+  "source": "origin/main contracts at 6b848b0; compiled unchanged with solc 0.8.28",
+  "registry": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+  "wallet": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
+  "deploymentTransactions": [
+    "0xd0b04956891dc6e5e5e6cddf2430c0eda9c5849894be84f1930ebaaaf0bfade2",
+    "0xc321d5f7a250920e4fc9ca81e835390b43427ebde8e490bb3677a0f023761e61"
+  ],
+  "deploymentBlocks": [
+    "1",
+    "2"
+  ],
+  "checks": {
+    "unconfiguredRosterRejected": true,
+    "wrongChainRejected": true,
+    "eoaAsWalletRejected": true
+  },
+  "publicDevnetAdmissionTested": false,
+  "onchainRecoveryTested": false
+}
