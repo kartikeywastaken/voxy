@@ -22,7 +22,20 @@
       "0x7017ff35EC300e336D3fB5FFBC9A5a80A81a7C71"
     ],
     "rosterThreshold": 2,
-    "rpc": "https://ethereum-sepolia.publicnode.com"
+    "rpc": "https://ethereum-sepolia.publicnode.com",
+    "VoxyDelegate": "0x7E4C98C97FEb486A94686775961124A580606feB",
+    "VoxyDelegate_tx": "0x1dade38df1989c8aff358b9f4654ceb7b8f18eae27ebe27f7f26d2aa8cc4452c",
+    "eoa7702Demo": {
+      "victimEOA": "0xBFb354B706Cc37D9F5ee0C631f4496A3BA54d60c",
+      "recoveredKey": "0xD6F3520E9E342B0C14feB901d2bEd93585c46829",
+      "delegateTx": "0x6b82d63ab2d7ddcdc1ba95a78f6c7b608fb649c93b23b0d428c9f2228e8f11f9",
+      "configureTx": "0x4660efaa36870a6347a3f4af9676eba235ba5bb2fa0db71130edabfa22898d83",
+      "requestRecoveryTx": "0x53992ddf86a6aedcb9127d0391aa0310561f7341ab6fd5ff53a081a0c1ac5630",
+      "executeRecoveryTx": "0x379fe14ebb23cdf68aa3112795584e9b13a95c6186d274aecdf00f374535e76a",
+      "recoveredSpendTx": "0x843d29a04f816ca91393d7ee9d8b175e65a5bf090c2a45fd1cf0c80d5f793ab0",
+      "recoveryDelaySecondsUsed": 0,
+      "note": "Live EIP-7702 recovery of an existing EOA on Sepolia: the EOA delegated to VoxyDelegate (code 0xef0100+impl, funds in place), guardians read LIVE from the ENSv2 RosterPublisher, a 2-of-3 ENS guardian quorum added a new controller (add-only; original self-controller retained), and the recovered key then moved the EOA's funds. Delay set to 0 for the live run; the time-lock is enforced (proven on devnet). 7702 recovers key LOSS, not key THEFT (the raw key stays authoritative)."
+    }
   },
   "devnet": {
     "chainId": 1337,
@@ -34,7 +47,23 @@
     "entryPoint": "0x00000000000000000000000000000000000000aa",
     "RosterRegistry_tx": "0x0a13ae2b6990c1242d5777678ab7ef0c7d5faca0ceb164e5b596e2b0d4e1cb7b",
     "VoxyWallet_tx": "0x1f246999b4cbd3695ce8fca28b39a2218c6583dd641e4093c29b76909389b1bd",
-    "note": "Deployed as ordinary contracts on the EIP-8141 devnet. Frame-native VERIFY entrypoint pending (needs staking predeploy + hegota-support)."
+    "note": "VoxyWallet is the ordinary-tx wallet (quorum checked in execution). VoxyWalletFrame below is the EIP-8141 frame-native wallet, admission-tested live.",
+    "VoxyWalletFrame": "0x537a4409cC943DE3FEc5605D1923eEDf938A9fD4",
+    "frame": {
+      "staked": true,
+      "stakeAmountWei": "12000000000000000",
+      "submitMethod": "eth_sendFrameTransaction",
+      "canonicalRejected": true,
+      "stakeFrameTx": "0x3e3b5311a59de2725fdcf6390be98f437d2b764db3a6fc767eefb4faa2f26b02",
+      "recoveryFrameTx": "0x70cdf88e0b96fdab5b5c8700b73148762cbdbd9a24a40261c40a0bf24fa2fe21",
+      "recoveryFrameTx2": "0x25cd180b80518db114ac36188c8ad1a75df9c34e4f840ab46c6a299e2609e330",
+      "executeRecoveryTx": "0x9cd19bc3c9929977b16e37442e78feaaeb10dc3ce8461c2f803fecb6b183fb71",
+      "ownersAfterRecovery": [
+        "0xF9F3F7d427C3102b1A4Bf9B1248758c54a37C323",
+        "0x2222222222222222222222222222222222222222"
+      ],
+      "note": "EIP-8141 VERIFY-frame recovery: guardian quorum checked via sigparam (RESOLVED_SIGNER, no ecrecover in validation), RosterRegistry read as foreign state, admitted by the staked alt-mempool and rejected by the canonical mempool. Add-only finalize confirmed ownerCount 1->2."
+    }
   },
   "arkiv": {
     "chainId": 7794095,
