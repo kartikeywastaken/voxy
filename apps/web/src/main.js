@@ -27,15 +27,16 @@ document.querySelector("#app").innerHTML = `
   <header class="site-header shell">
     <a class="brand" href="#" aria-label="Voxy home">${logo}</a>
     <nav aria-label="Main navigation"><a href="#how-it-works">How it works</a><a href="#why-voxy">Why Voxy</a><a href="#faq">FAQs</a></nav>
-    <button class="button button-small" data-open="protect">Launch app ${icon("diagonal")}</button>
+    <button class="button button-small" data-open="protect">Protect my wallet ${icon("diagonal")}</button>
   </header>
   <main id="main">
     <section class="hero shell" aria-labelledby="hero-title">
       <div class="hero-copy">
         <div class="eyebrow"><span class="status-dot"></span> Your wallet. Your name. Your way back.</div>
         <h1 id="hero-title"><span class="headline-line">Lose your keys.</span><span class="headline-line">Keep your</span><span class="headline-line title-last">crypto<span class="asterisk">✳</span></span></h1>
-        <p class="hero-description">Life happens. Your crypto shouldn’t disappear.<br>Meet wallet recovery built around your ENS name.<br>Simple to set up. Human by design.</p>
+        <p class="hero-description">Life happens. Your crypto shouldn’t disappear.<br>Meet wallet recovery built around your ENS name.<br>Set it up once, on a calm day — for the bad one.</p>
         <div class="hero-actions"><button class="button" data-open="protect">Protect my wallet ${icon("diagonal")}</button><button class="text-button" data-open="recover">I need to recover ${icon("arrow")}</button></div>
+        <p class="hero-footnote"><b>✳</b>Because "I'll write it down later" isn't a backup plan.</p>
         <div class="hero-note">${icon("shield")} Your keys stay yours. Always.</div>
       </div>
       <div class="portal-scene" aria-label="An animated ASCII portal surrounds an illustrative ENS recovery card">
@@ -45,7 +46,7 @@ document.querySelector("#app").innerHTML = `
         <span class="cross cross-one">+</span><span class="cross cross-two">+</span>
         <div class="identity-card">
           <div class="identity-top"><span class="identity-avatar">v</span><span class="mono">YOUR WAY BACK</span>${icon("diagonal")}</div>
-          <div class="ens-name">you.eth<span class="verified">${icon("check")}</span></div>
+          <div class="ens-name">you.eth<span class="ens-tag" aria-hidden="true">◈</span></div>
           <div class="identity-bottom"><span><i class="status-dot"></i> Recovery, reimagined.</span>${icon("lock")}</div>
         </div>
         <div class="portal-caption"><span class="tiny-box"></span> A name you remember.<br><span class="caption-indent">A wallet you don’t lose.</span></div>
@@ -54,7 +55,7 @@ document.querySelector("#app").innerHTML = `
       <div class="hero-footer"><span>Built around <b class="ens-symbol">◈</b> <strong>ENS</strong><span class="ethereum">◆</span> Ethereum</span></div>
     </section>
     <section class="recovery-section shell" id="how-it-works" aria-labelledby="recovery-heading">
-      <div class="recovery-heading"><span class="section-kicker">Recovery, in three moves</span><h2 id="recovery-heading">Your name is<br>the beginning.</h2><p>A familiar identity. A plan made in advance.<br>A path back when you need it.</p></div>
+      <div class="recovery-heading"><span class="section-kicker">Recovery, in three moves</span><h2 id="recovery-heading">Your name is<br>the beginning.</h2><p>A plan made in advance beats one made in panic.</p></div>
       <div class="recovery-workspace">
         <div class="recovery-tabs" role="tablist" aria-label="Explore recovery steps" aria-orientation="vertical">
           <button role="tab" id="step-name" aria-controls="panel-name" aria-selected="true" tabindex="0"><span class="step-index">01</span><span><strong>A name you know.</strong><small>Start with your ENS identity.</small></span><span class="step-arrow" aria-hidden="true">↗</span></button>
@@ -66,18 +67,18 @@ document.querySelector("#app").innerHTML = `
           <div id="panel-name" class="recovery-panel" role="tabpanel" aria-labelledby="step-name" tabindex="0"><div class="recovery-art art-name" aria-hidden="true"><span class="ascii-bracket">[</span><span class="recovery-ens">you.eth</span><span class="ascii-bracket">]</span></div><div class="panel-copy"><span class="mono">01 / IDENTITY</span><h3>Less hexadecimal.<br>More human.</h3><p>Your ENS name is a familiar starting point for your wallet. Recovery still requires a compatible wallet and an authorized recovery method.</p></div></div>
           <div id="panel-plan" class="recovery-panel" role="tabpanel" aria-labelledby="step-plan" tabindex="0" hidden><div class="recovery-art art-plan" aria-hidden="true"><span>[ you ]</span><span class="ascii-path">······</span><span class="plan-symbol">{ key }</span><span class="ascii-path">······</span><span>[ plan ]</span></div><div class="panel-copy"><span class="mono">02 / PREPARATION</span><h3>A little foresight.<br>A lot less panic.</h3><p>Choose and authorize a recovery method before you need it. Know what’s required to regain access, while you still have access.</p></div></div>
           <div id="panel-home" class="recovery-panel" role="tabpanel" aria-labelledby="step-home" tabindex="0" hidden><div class="recovery-art art-home" aria-hidden="true"><span class="home-orbit">(</span><span class="home-symbol">&gt;_</span><span class="home-orbit">)</span></div><div class="panel-copy"><span class="mono">03 / RETURN</span><h3>New keys.<br>Same you.</h3><p>Start with your name, complete your configured verification, and authorize your recovery. Your identity is the starting point, never a substitute for proof.</p></div></div>
-          <div class="recovery-stage-bottom"><span>Explore the flow. No transactions.</span><button class="text-button" data-open="protect">Try the preview ${icon("arrow")}</button></div>
+          <div class="recovery-stage-bottom"><span>Explore the flow. No transactions.</span><button class="text-button" data-open="recover">Preview recovery ${icon("arrow")}</button></div>
         </div>
       </div>
     </section>
-    <section class="why-section" id="why-voxy"><div class="shell why-layout"><div class="why-art" aria-hidden="true"><span class="pixel-key">✳</span><span class="mono">A BACKUP PLAN.<br>NOT A COMPROMISE.</span></div><div class="why-copy"><span class="section-kicker">OWNERSHIP SHOULD FEEL LIKE THIS</span><h2>Your wallet.<br>Your life.<br>Your way back.</h2><p>Web3 gives you ownership. Voxy is exploring what comes next: a more human way to recover it.</p><div class="benefit">${icon("globe")} <span>A name, not a string of characters.</span></div><div class="benefit">${icon("key")} <span>Self-custody at the heart of the design.</span></div><div class="benefit">${icon("shield")} <span>A recovery journey you can understand.</span></div><button class="text-button" data-open="protect">Take a look inside ${icon("diagonal")}</button></div></div></section>
+    <section class="why-section" id="why-voxy"><div class="shell why-layout"><div class="why-art" aria-hidden="true"><span class="pixel-key">✳</span><span class="mono">A BACKUP PLAN.<br>NOT A COMPROMISE.</span></div><div class="why-copy"><span class="section-kicker">OWNERSHIP SHOULD FEEL LIKE THIS</span><h2>Your wallet.<br>Your life.<br>Your way back.</h2><p>Web3 handed you ownership, then handed you a sleepless night to go with it. Voxy is exploring what comes next: recovery a person can actually follow.</p><div class="benefit">${icon("globe")} <span>A name, not a string of characters.</span></div><div class="benefit">${icon("key")} <span>You keep the keys. We design the way back.</span></div><div class="benefit">${icon("shield")} <span>A recovery path in plain words.</span></div><button class="text-button" data-open="protect">Protect my wallet ${icon("arrow")}</button></div></div></section>
     <section class="faq-section shell section" id="faq"><div><span class="section-kicker">GOOD QUESTIONS.</span><h2>A little clarity.<br>A lot less worry.</h2><p>Because peace of mind starts with understanding.</p></div><div class="faq-list">
       <details><summary>What is Voxy?<span>+</span></summary><p>Voxy is ENS-based wallet recovery. Your guardian roster is an ENSv2 namespace on Sepolia, enforced on an EIP-8141 alt-mempool devnet, with recovery requests coordinated on Arkiv.</p></details>
       <details><summary>Can I recover a wallet with only an ENS name?<span>+</span></summary><p>No. An ENS name can identify an account, but it does not authorize recovery. A compatible wallet needs a recovery mechanism configured in advance, with its required verification.</p></details>
       <details><summary>Does Voxy need my seed phrase?<span>+</span></summary><p>This preview never requests a seed phrase or private key. The production recovery design should verify authorization through the wallet’s configured recovery mechanism.</p></details>
       <details><summary>Can I use it with my wallet today?<span>+</span></summary><p>The recovery console is wired to live contracts: an ENSv2 guardian roster on Sepolia and a VoxyWallet on the EIP-8141 alt-mempool devnet. Starting a recovery submits a real guardian-quorum transaction.</p></details>
     </div></section>
-    <section class="final-cta shell"><span class="section-kicker">FOR ALL THE “JUST IN CASE” MOMENTS.</span><h2>Give your wallet<br>a way home<span>✳</span></h2><button class="button" data-open="protect">Explore Voxy ${icon("diagonal")}</button><div class="cta-dots" aria-hidden="true"></div></section>
+    <section class="final-cta shell"><span class="section-kicker">FOR ALL THE “JUST IN CASE” MOMENTS.</span><h2>Give your wallet<br>a way home<span>✳</span></h2><button class="button" data-open="protect">Protect my wallet ${icon("diagonal")}</button><div class="cta-dots" aria-hidden="true"></div></section>
   </main>
   <footer class="site-footer shell"><a class="brand" href="#" aria-label="Voxy home">${logo}</a><span>A name. A way back.</span><a href="#faq">Questions? Start here ${icon("diagonal")}</a><span class="copyright">© ${new Date().getFullYear()} Voxy</span></footer>
   <dialog id="recovery-dialog" data-lenis-prevent><button class="dialog-close" aria-label="Close recovery preview">${icon("close")}</button><div id="dialog-content"></div></dialog>
