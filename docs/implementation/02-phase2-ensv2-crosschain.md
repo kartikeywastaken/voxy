@@ -8,13 +8,13 @@ Read first: `docs/GROUNDED_FACTS.md` (real addresses + role constants) and in `r
 `src/access-control/`, `lib/verifiable-factory/`, `src/resolver/`.
 
 ## 2a. Sepolia setup (scripts, `contracts/sepolia/script/`)
-1. Register parent `keymesh.eth` via the ETHRegistrar (commit-reveal), **long duration**.
+1. Register parent `voxy.eth` via the ETHRegistrar (commit-reveal), **long duration**.
 2. Deploy a per-user `UserRegistry` via `VerifiableFactory` (deterministic CREATE2).
 3. Create 3 guardian slot subnames `g1/g2/g3`. Grant the guardian the slot token WITHOUT
    `ROLE_CAN_TRANSFER` (→ non-transferable); cold admin keeps `ROLE_UNREGISTER` (→ revocable);
    set an expiry (→ expiring). See GROUNDED_FACTS mapping.
 4. Store the devnet wallet address under the ENSIP-11 chain coin type (`2147484985` — `[U]`, verify)
-   on the user's Permissioned resolver. Store policy as `keymesh.*` text records (threshold,
+   on the user's Permissioned resolver. Store policy as `voxy.*` text records (threshold,
    recovery delay, add delay). No hardcoded values anywhere.
 
 ## 2b. RosterPublisher.sol (Sepolia)

@@ -33,7 +33,7 @@ Roles are nybble-packed; each role's admin is the same bit shifted `<< 128`.
 | ROLE_CAN_TRANSFER_ADMIN | `(1 << 28) << 128` | gate on whether the token owner may transfer |
 | ROLE_UPGRADE | `1 << 124` | UUPS upgrade (root only) |
 
-### How this maps to KeyMesh guardian slots (resolves bible 5.2)
+### How this maps to Voxy guardian slots (resolves bible 5.2)
 - **Non-transferable slot:** do NOT grant the guardian `ROLE_CAN_TRANSFER` (it is checked on the
   token owner, not the operator). The slot token then cannot be moved by the guardian.
 - **Revocable by cold admin:** cold admin holds `ROLE_UNREGISTER` (+ its admin) → can revoke a slot.
@@ -51,7 +51,7 @@ Pin exact modifiers/ABIs from `src/registry/PermissionedRegistry.sol`, `UserRegi
 - `src/registry/interfaces/IRegistry.sol`, `IPermissionedRegistry.sol`
 - `src/access-control/` (EnhancedAccessControl)
 - `lib/verifiable-factory/` (CREATE2 deterministic deploy)
-- `src/resolver/` (Permissioned resolver, text records for `keymesh.*` policy)
+- `src/resolver/` (Permissioned resolver, text records for `voxy.*` policy)
 
 ## Still unverified (`[U]` — confirm at the event / in docs)
 - ENSIP-11 coin type for chain 1337 = `2147484985` (`0x80000000 | 1337`) — confirm the record key.

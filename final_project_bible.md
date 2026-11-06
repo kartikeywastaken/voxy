@@ -1,4 +1,4 @@
-# KeyMesh Bible (v3, final)
+# Voxy Bible (v3, final)
 
 ETHGlobal Mumbai 2026. Written Nov 6, 2026. Supersedes the earlier "Master Plan and Bible".
 
@@ -17,7 +17,7 @@ ETHGlobal Mumbai 2026. Written Nov 6, 2026. Supersedes the earlier "Master Plan 
 
 ## 1. Thesis
 
-**KeyMesh is wallet recovery whose guardian roster is an ENSv2 namespace, enforced inside an EIP-8141 VERIFY frame on the alt mempool, with approvals coordinated on Arkiv and revocation that crosses chains with an explicit, minimised trust model.**
+**Voxy is wallet recovery whose guardian roster is an ENSv2 namespace, enforced inside an EIP-8141 VERIFY frame on the alt mempool, with approvals coordinated on Arkiv and revocation that crosses chains with an explicit, minimised trust model.**
 
 One-line pitch:
 > "Your guardians are ENS names. Revoke one on Sepolia and its old approval stops working on a frame-transaction chain, with no sponsor in the submission path."
@@ -41,7 +41,7 @@ Seen at README level only. **Read each repo's code in hour 0 and update this tab
 
 ### The bar we must clear on top of the unique idea
 
-| Quality bar (seen in rivals) | KeyMesh must have |
+| Quality bar (seen in rivals) | Voxy must have |
 |---|---|
 | Live deployed UI | Public URL, three screens, works from a fresh browser |
 | One-command story | `pnpm demo` runs the whole narrative incl. attacks; `pnpm bootstrap` redeploys after a devnet reset |
@@ -89,7 +89,7 @@ Seen at README level only. **Read each repo's code in hour 0 and update this tab
  │ UserRegistry/user  │──────────▶️ │ (2-of-3 sign) │─────────────▶️ │  - verifies 2-of-3               │
  │ g1,g2,g3 slots     │            │ verify-sync   │               │  - removals instant, adds delayed│
  │ EAC roles, expiry  │            │ CLI (anyone)  │               │  - writes recent root (Mode B)   │
- │ RosterPublisher    │            └───────────────┘               │ KeyMeshWallet (frame account)    │
+ │ RosterPublisher    │            └───────────────┘               │ VoxyWallet (frame account)    │
  └────────────────────┘                                            │  - owner path / recovery path    │
                                                                    │ RecoveryPaymaster (Tier 2)       │
           ARKIV (Rabdi testnet)                                    └───────────────▲──────────────────┘
@@ -110,7 +110,7 @@ Three chains, three jobs: Sepolia holds identity truth, the devnet enforces poli
 - One **UserRegistry per user name**, deployed through the **VerifiableFactory** with deterministic CREATE2 addresses. `[V]` (docs: Verifiable Factory, Registry Template)
 - Three fixed guardian slot subnames per user: `g1`, `g2`, `g3` under the user's registry.
 - Wallet name resolves to the wallet: store the **devnet wallet address under the ENSIP-11 chain-specific coin type** (`0x80000000 | 1337` = 2147484985). `[U]` verify ENSIP-11 in the ENS docs. This is the cross-chain identity, no hard-coded address.
-- Policy readable by anyone as text records on the user's Permissioned Resolver: threshold, recovery delay, add delay (record keys `keymesh.*`). `[D]`
+- Policy readable by anyone as text records on the user's Permissioned Resolver: threshold, recovery delay, add delay (record keys `voxy.*`). `[D]`
 
 ### 5.2 Roles and separation of duties (Enhanced Access Control) `[D]`
 - **Cold admin**: can revoke guardians, change thresholds, grant roles. Holds the owner's cold key.
@@ -156,7 +156,7 @@ Attesters post a bond; anyone can challenge with an MPT storage proof against th
 
 ## 7. Devnet layer (EIP-8141 / ERC-8421)
 
-### 7.1 KeyMeshWallet (frame account) `[D]`
+### 7.1 VoxyWallet (frame account) `[D]`
 State: `owners` (set), `ownerEpoch`, `registry` address, `pending {key, readyAt, requestId}`, `frozen`.
 
 Two VERIFY paths:
@@ -297,7 +297,7 @@ Hours are from the moment you start building. **If the deadline is Nov 7 09:00 I
 **Phase 1 (H2-8): devnet core** (Protocol lead)
 - Deploy a validation-frame wallet that reads a separate contract (workshop steps 4-8). Capture canonical rejection and staked admission reports.
 - Prove sibling-frame introspection (Gate 2).
-- Implement `KeyMeshWallet` owner path + recovery path with quorum, digest, epoch checks, add-only.
+- Implement `VoxyWallet` owner path + recovery path with quorum, digest, epoch checks, add-only.
 - Foundry tests for every invariant in section 11 and below.
 - *Done when:* a 2-of-3 recovery tx is admitted and included, and fewer-than-M, duplicate, wrong-epoch and swapped-frame cases are rejected.
 
@@ -331,8 +331,8 @@ Hours are from the moment you start building. **If the deadline is Nov 7 09:00 I
 
 ### Repo layout
 ```
-keymesh/
-  contracts/devnet/    KeyMeshWallet.sol  RosterRegistry.sol  RecoveryPaymaster.sol  lib/Digest.sol  test/
+voxy/
+  contracts/devnet/    VoxyWallet.sol  RosterRegistry.sol  RecoveryPaymaster.sol  lib/Digest.sol  test/
   contracts/sepolia/   RosterPublisher.sol  script/ (ENSv2 setup)
   packages/frame-sdk/  packages/attester/  packages/arkiv/  packages/watcher/
   apps/web/

@@ -12,7 +12,7 @@ frame account as the starting shape for the validation entrypoint.
 2. **`RosterRegistry.sol`** — `submitRoster` verifies 2-of-3 distinct attester sigs, `epoch ==
    stored+1`, `validUntil`. Stores `Roster`. `isActiveGuardian` checks `activeAt <= now`.
    (Attester set is fixed at deploy; 3 known keys from `.env`.)
-3. **`KeyMeshWallet.sol`** — state `{owners, ownerEpoch, registry, pending, frozen}`. Two VERIFY
+3. **`VoxyWallet.sol`** — state `{owners, ownerEpoch, registry, pending, frozen}`. Two VERIFY
    paths:
    - **Owner path:** signature from a current owner. Always valid (liveness escape).
    - **Recovery path:** reads `RosterRegistry.rosterOf(this)`, checks quorum of guardian sigs over
@@ -35,7 +35,7 @@ Done when: admitted+included 2-of-3 recovery on devnet; all reject cases pass in
 
 ## Codex (B) — frame-sdk (`packages/frame-sdk/`)
 
-Build against the ABIs in INTERFACES.md; mock `RosterRegistry`/`KeyMeshWallet` until A ships (~H8).
+Build against REAL contracts. A deploys `RosterRegistry`/`VoxyWallet` to a shared local anvil in hour 1 and writes `deployments.local.json`; B consumes those real ABIs + addresses immediately. NO MOCKS, NO STUBS — if a contract is not ready, work on a part that does not need it. (Kartik: do not mock anything, we need actually working stuff.)
 
 1. `buildRecoveryTx(...)`: assemble the 3-frame recovery tx (expiry_verify → VERIFY → SENDER)
    per bible §7.2, using the workshop's TS helpers. Do not rely on viem 0x06 support (bible §10).

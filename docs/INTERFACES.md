@@ -7,7 +7,7 @@ Freeze this by H2. Everything crossing the A/B boundary lives here. Change only 
 ### RosterAttestation (attesters sign; RosterRegistry verifies on devnet)
 ```
 RosterAttestation {
-  address wallet;            // the KeyMesh wallet this roster is for
+  address wallet;            // the Voxy wallet this roster is for
   uint64  epoch;             // monotonic; must equal stored epoch + 1
   bytes32 rosterHash;        // keccak(abi.encode(guardians, threshold, parentExpiryBucket))
   address[3] guardians;      // slot owners at read time; address(0) = empty/expired slot
@@ -18,7 +18,7 @@ RosterAttestation {
 }
 ```
 
-### RecoveryDigest (guardians sign; KeyMeshWallet VERIFY recomputes)
+### RecoveryDigest (guardians sign; VoxyWallet VERIFY recomputes)
 ```
 RecoveryDigest {
   uint256 chainId;
@@ -33,7 +33,7 @@ RecoveryDigest {
 }
 ```
 
-## 2. Devnet contract ABIs (Claude publishes real; Codex mocks until ~H8)
+## 2. Devnet contract ABIs (Claude deploys REAL to a shared local anvil in hour 1 — NO MOCKS)
 
 ### RosterRegistry
 ```solidity
@@ -44,7 +44,7 @@ function isActiveGuardian(address wallet, address g) external view returns (bool
 event RosterUpdated(address indexed wallet, uint64 epoch, bytes32 hash);
 ```
 
-### KeyMeshWallet
+### VoxyWallet
 ```solidity
 function requestRecovery(address newKey, bytes32 requestId) external;   // via SENDER frame after VERIFY quorum
 function executeRecovery() external;                                    // after RECOVERY_DELAY
@@ -68,7 +68,7 @@ event RosterChanged(address indexed account, uint64 epoch, bytes32 rosterHash,
 
 ## 4. Arkiv entity schema (Codex owns; both read)
 
-All entities carry `project = "keymesh"`. Owner wallet = who may edit. Expiry native to Arkiv.
+All entities carry `project = "voxy"`. Owner wallet = who may edit. Expiry native to Arkiv.
 
 | Entity type | Owner | Expires | Queryable attrs | Payload (opaque) |
 |---|---|---|---|---|
@@ -81,8 +81,8 @@ Clients MUST verify signature + roster membership + epoch before trusting any en
 ## 5. deployments.json (written by bootstrap; read by everyone)
 ```json
 {
-  "sepolia":  { "chainId": 11155111, "RosterPublisher": "0x..", "parentName": "keymesh.eth", "userRegistry": "0x.." },
-  "devnet":   { "chainId": 1337, "RosterRegistry": "0x..", "KeyMeshWallet": "0x..", "RecoveryPaymaster": "0x.." },
+  "sepolia":  { "chainId": 11155111, "RosterPublisher": "0x..", "parentName": "voxy.eth", "userRegistry": "0x.." },
+  "devnet":   { "chainId": 1337, "RosterRegistry": "0x..", "VoxyWallet": "0x..", "RecoveryPaymaster": "0x.." },
   "ensv2":    { "VerifiableFactory": "0x118bc31a50d559f7015a8da26d54b3b030cdb70f", "...": "see GROUNDED_FACTS.md" },
   "arkiv":    { "chainId": 7794095, "writers": ["0x.."] }
 }
