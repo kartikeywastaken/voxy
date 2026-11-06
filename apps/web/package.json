@@ -8,14 +8,12 @@
     "build": "node scripts/generate-og.mjs && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test": "node --test",
-    "og": "node scripts/generate-og.mjs",
-    "smoke": "node scripts/smoke.mjs"
+    "og": "node scripts/generate-og.mjs"
   },
   "dependencies": {
     "lenis": "^1.3.15"
   },
   "devDependencies": {
-    "playwright": "^1.65.0",
     "vite": "^6.1.0"
   }
 }
