@@ -33,6 +33,8 @@ export const api = {
   cancelRecovery: (wallet) => call("/api/recover/cancel", { method: "POST", body: JSON.stringify({ wallet }) }),
   createWallet: (owner) =>
     call("/api/wallet/create", { method: "POST", body: JSON.stringify({ owner }) }),
+  run7702: (destination) =>
+    call("/api/7702/run", { method: "POST", body: JSON.stringify({ destination }) }),
   // --- recovery coordination hub ---
   requestRecovery: (wallet, newKey) =>
     call("/api/recover/request", { method: "POST", body: JSON.stringify({ wallet, newKey }) }),

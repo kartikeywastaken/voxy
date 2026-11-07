@@ -181,7 +181,7 @@ export function mountConsole(container, mode) {
         <p id="vc-wallet-err" class="error" role="alert"></p>
         <p class="vc-fine"><b>You don't need the lost wallet or its keys.</b> Enter the account's address — your guardians approve a new owner you control, and after a short wait you are back in. If you only have your old owner address, enter it and we'll find the accounts it owned.</p>
         <div class="vc-entry-links">
-          <button type="button" class="text-button" id="vc-demo">Try it on the demo account →</button>
+          <button type="button" class="text-button" id="vc-7702">▶ Live EIP-7702 recovery (real, end-to-end) →</button>
           <button type="button" class="text-button" id="vc-guardian-mode">I'm a guardian — approve a request →</button>
         </div>
       </form>
@@ -203,8 +203,8 @@ export function mountConsole(container, mode) {
           <button class="button button-small" type="submit">Load</button>
         </div>
         <p id="vc-wallet-err" class="error" role="alert"></p>
-        <button type="button" class="text-button" id="vc-demo">Use the live demo wallet →</button>
-        <p class="vc-fine">Connect your wallet (or paste an address) to manage the Voxy accounts it owns, or create one. The demo account signs guardian actions with server-held keys.</p>
+        <p class="vc-fine">Connect your wallet, or paste an account address, to manage the Voxy accounts it owns or create one.</p>
+        <button type="button" class="text-button" id="vc-7702">▶ Live EIP-7702 recovery (real, end-to-end) →</button>
         <button type="button" class="text-button" id="vc-guardian-mode">I'm a guardian — approve a request →</button>
       </form>
       <div class="vc-foot">
@@ -233,8 +233,64 @@ export function mountConsole(container, mode) {
         (addr) => go(addr),
       ),
     );
-    container.querySelector("#vc-demo").addEventListener("click", () => go(undefined));
     container.querySelector("#vc-guardian-mode")?.addEventListener("click", renderGuardian);
+    container.querySelector("#vc-7702")?.addEventListener("click", render7702);
+  }
+
+  /* ------------------------------ live EIP-7702 recovery of a real wallet */
+  function render7702() {
+    clearTimer();
+    clearPoll();
+    container.innerHTML = `
+      <div class="vc-head">
+        <span class="preview-label">Voxy · EIP-7702</span>
+        <h2 class="vc-title">Recover a real wallet</h2>
+      </div>
+      <div class="vc-enter">
+        <p class="vc-fine">The real thing, end to end: Voxy spins up a normal wallet, funds it with Sepolia ETH, adds recovery via <b>EIP-7702</b> (no new account, no moving funds), then guardians recover it and the funds land in the wallet you choose. Every step is a live Sepolia transaction — no simulation.</p>
+        <label for="vc-7702-dest">Recover the funds into (your MetaMask on Sepolia)</label>
+        <input id="vc-7702-dest" value="0x25dCDf4b5eb269565A5fA92EcEfea304781a3538" placeholder="0x… address" autocomplete="off" spellcheck="false" />
+        <p id="vc-7702-err" class="error" role="alert"></p>
+        <button type="button" class="button" id="vc-7702-run">Run the live recovery →</button>
+        <div id="vc-7702-out"></div>
+        <button type="button" class="text-button" id="vc-7702-back">← Back</button>
+      </div>
+      <div class="vc-foot"><span class="vc-dim">Live on Sepolia · EIP-7702 · real transactions</span></div>`;
+    container.querySelector("#vc-7702-back").addEventListener("click", renderEntry);
+    container.querySelector("#vc-7702-run").addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      const dest = container.querySelector("#vc-7702-dest").value.trim();
+      const err = container.querySelector("#vc-7702-err");
+      if (!isAddress(dest)) {
+        err.textContent = "Enter a valid 0x… address.";
+        return;
+      }
+      err.textContent = "";
+      btn.disabled = true;
+      btn.textContent = "Running live on Sepolia… (~60–90s)";
+      const out = container.querySelector("#vc-7702-out");
+      out.innerHTML = `<div class="vc-note"><span class="status-dot"></span> Creating a wallet, funding it, protecting via EIP-7702, guardians recovering, sweeping the funds — all live…</div>`;
+      try {
+        const r = await api.run7702(dest);
+        const tx = (label, t) =>
+          t ? `<a href="${t.explorer}" target="_blank" rel="noopener">${label} · ${short(t.hash)} ↗</a>` : "";
+        out.innerHTML = `<div class="vc-note vc-ok-note"><b>✓ Recovered — ${r.recover.moved} ETH landed in ${short(r.recover.destination)}.</b>
+          <div class="vc-txlist">
+            ${tx("1 · wallet funded", r.created.fundTx)}
+            ${tx("2 · protected (EIP-7702)", r.protect.protectTx)}
+            ${tx("3 · guardians requested recovery", r.recover.requestTx)}
+            ${tx("4 · recovery executed", r.recover.executeTx)}
+            ${tx("5 · funds swept to safe wallet", r.recover.moveTx)}
+          </div>
+          <p class="vc-fine">Lost wallet <code>${short(r.created.address)}</code> → safe wallet <code>${short(r.recover.destination)}</code> (${r.recover.destinationBefore} → ${r.recover.destinationAfter} ETH). Open it in MetaMask on Sepolia to see the ETH arrive.</p></div>`;
+        btn.disabled = false;
+        btn.textContent = "Run again →";
+      } catch (e2) {
+        out.innerHTML = `<div class="vc-note vc-warn">${e2.message}</div>`;
+        btn.disabled = false;
+        btn.textContent = "Run the live recovery →";
+      }
+    });
   }
 
   /* --------------------------------- guardian: approve requests waiting for me */
@@ -391,7 +447,6 @@ export function mountConsole(container, mode) {
         <div class="vc-enter-actions">
           <button class="button" id="vc-create">Create recovery account</button>
           <button class="text-button" id="vc-connect">Connect a different wallet</button>
-          <button class="text-button" id="vc-usedemo">Use the demo wallet →</button>
         </div>
         <div id="vc-wallets2" class="vc-wallets"></div>
         <div id="vc-createresult"></div>
@@ -555,8 +610,7 @@ export function mountConsole(container, mode) {
                <button class="button" id="vc-continue">View time-lock →</button>`
             : `<button class="button" id="vc-guardian-sign">Approve as a guardian (this wallet)</button>
                <div id="vc-signwallets"></div>
-               <button class="text-button" id="vc-demo-approve">Simulate: approve with the demo guardians</button>
-               <p class="vc-fine">Share this with your guardians — each opens Voxy, connects their wallet, and clicks approve. The count rises here live, and recovery submits itself once <b>${threshold}</b> have approved. No copy-paste.</p>`
+               <p class="vc-fine">Each guardian opens Voxy, goes to <b>"I'm a guardian — approve a request"</b>, connects their wallet and approves. The count rises here live, and recovery submits itself once <b>${threshold}</b> guardians have approved.</p>`
         }
         <p id="vc-status-err" class="error" role="alert"></p>
         <button class="text-button" id="vc-recovery-cancel">← Start a different request</button>
@@ -583,7 +637,6 @@ export function mountConsole(container, mode) {
   function render() {
     clearPoll();
     const s = S;
-    const demo = s.wallet.toLowerCase() === (s.demoWallet || "").toLowerCase();
     const panel =
       view.tab === "guardians"
         ? panelGuardians()
@@ -596,7 +649,7 @@ export function mountConsole(container, mode) {
     container.innerHTML = `
       <div class="vc-head">
         <span class="preview-label">Voxy recovery</span>
-        <h2 class="vc-title">${mode === "recover" ? "Recover a wallet" : "Protect a wallet"}${demo ? ' <span class="vc-badge">demo</span>' : ""}</h2>
+        <h2 class="vc-title">${mode === "recover" ? "Recover an account" : "Protect a wallet"}</h2>
         <form id="vc-switch" class="vc-walletbar">
           <label for="vc-wallet">${mode === "recover" ? "Wallet to recover" : "Wallet to protect"}</label>
           <div class="vc-walletbar-row">
@@ -604,11 +657,7 @@ export function mountConsole(container, mode) {
             <button class="button button-small" type="submit">Load</button>
           </div>
           <p id="vc-wallet-err" class="error" role="alert"></p>
-          <p class="vc-fine vc-walletnote">${
-            demo
-              ? "Demo wallet — the server holds its keys, so every action here runs live."
-              : `Owned by <code>${short(s.owners?.[0] || s.wallet)}</code>. Account and guardian settings are read from chain.`
-          }</p>
+          <p class="vc-fine vc-walletnote">Owned by <code>${short(s.owners?.[0] || s.wallet)}</code>. Account and guardian settings are read from chain.</p>
         </form>
         ${(s.accounts?.length ?? 0) > 1 ? `<label class="vc-account-select">${mode === "recover" ? "Which account are you recovering?" : "Voxy accounts this wallet owns"}<select id="vc-account">${s.accounts.map((a) => `<option value="${a}" ${a.toLowerCase() === s.wallet.toLowerCase() ? "selected" : ""}>${a}</option>`).join("")}</select><span class="vc-fine vc-account-hint">${mode === "recover" ? "This wallet owns more than one Voxy account — pick the one you lost access to." : "This wallet owns more than one Voxy account. Pick the one to manage."}</span></label>` : ""}
         <nav class="vc-tabs" role="tablist">
@@ -779,20 +828,6 @@ export function mountConsole(container, mode) {
       clearPoll();
       view.recovery = null;
       render();
-    });
-    container.querySelector("#vc-demo-approve")?.addEventListener("click", async (e) => {
-      const b = e.currentTarget;
-      const serr = container.querySelector("#vc-status-err");
-      b.disabled = true;
-      b.textContent = "Approving with demo guardians…";
-      try {
-        view.recovery.status = await api.demoApprove(view.recovery.id);
-        render();
-      } catch (e2) {
-        b.disabled = false;
-        b.textContent = "Simulate: approve with the demo guardians";
-        serr.textContent = e2.message;
-      }
     });
     container.querySelector("#vc-guardian-sign")?.addEventListener("click", async (e) => {
       const serr = container.querySelector("#vc-status-err");

@@ -15,6 +15,7 @@ import {
   pendingForGuardian,
   requestRecovery,
 } from "./coordinator.js";
+import { runDemo } from "./eoa7702.js";
 import { sponsoredWrite } from "./queue.js";
 import { walletState } from "./state.js";
 import { createWallet } from "./wallet.js";
@@ -111,9 +112,17 @@ const server = createServer(async (req, res) => {
     if (
       route.startsWith("POST /api/recover/") ||
       route.startsWith("POST /api/guardians/") ||
-      route.startsWith("POST /api/wallet/")
+      route.startsWith("POST /api/wallet/") ||
+      route.startsWith("POST /api/7702/")
     ) {
       if (!authorized(req)) return send(res, 401, { error: "unauthorized" });
+    }
+
+    if (route === "POST /api/7702/run") {
+      const body = await readJson(req);
+      if (typeof body.destination !== "string" || !isAddress(body.destination, { strict: false }))
+        return send(res, 400, { error: "destination must be an address" });
+      return send(res, 200, await sponsoredWrite(() => runDemo(body.destination as string)));
     }
 
     if (route === "POST /api/wallet/create") {
