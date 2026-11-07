@@ -13,6 +13,7 @@
     "@voxy/chain": "workspace:*",
     "@voxy/attester": "workspace:*",
     "@voxy/orchestrator": "workspace:*",
-    "viem": "^2.38.0"
+    "viem": "^2.38.0",
+    "@voxy/arkiv": "workspace:*"
   }
 }

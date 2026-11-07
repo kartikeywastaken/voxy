@@ -10,6 +10,7 @@
   "dependencies": {
     "@voxy/frame-sdk": "workspace:*",
     "@arkiv-network/sdk": "1.0.1",
-    "viem": "^2.38.0"
+    "viem": "^2.38.0",
+    "@voxy/chain": "workspace:*"
   }
 }

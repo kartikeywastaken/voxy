@@ -73,15 +73,15 @@ document.querySelector("#app").innerHTML = `
     </section>
     <section class="why-section" id="why-voxy"><div class="shell why-layout"><div class="why-art" aria-hidden="true"><span class="pixel-key">✳</span><span class="mono">A BACKUP PLAN.<br>NOT A COMPROMISE.</span></div><div class="why-copy"><span class="section-kicker">OWNERSHIP SHOULD FEEL LIKE THIS</span><h2>Your wallet.<br>Your life.<br>Your way back.</h2><p>Web3 handed you ownership, then handed you a sleepless night to go with it. Voxy is exploring what comes next: recovery a person can actually follow.</p><div class="benefit">${icon("globe")} <span>A name, not a string of characters.</span></div><div class="benefit">${icon("key")} <span>You keep the keys. We design the way back.</span></div><div class="benefit">${icon("shield")} <span>A recovery path in plain words.</span></div><button class="text-button" data-open="protect">Protect my wallet ${icon("arrow")}</button></div></div></section>
     <section class="faq-section shell section" id="faq"><div><span class="section-kicker">GOOD QUESTIONS.</span><h2>A little clarity.<br>A lot less worry.</h2><p>Because peace of mind starts with understanding.</p></div><div class="faq-list">
-      <details><summary>What is Voxy?<span>+</span></summary><p>Voxy is ENS-based wallet recovery. Your guardian roster is an ENSv2 namespace on Sepolia, enforced on an EIP-8141 alt-mempool devnet, with recovery requests coordinated on Arkiv.</p></details>
+      <details><summary>What is Voxy?<span>+</span></summary><p>Voxy adds guardian recovery to a Sepolia Ethereum account through EIP-7702. Your address and funds stay in place, your guardians live in a dedicated ENSv2 namespace, and signed recovery approvals are coordinated on Arkiv.</p></details>
       <details><summary>Can I recover a wallet with only an ENS name?<span>+</span></summary><p>No. An ENS name can identify an account, but it does not authorize recovery. A compatible wallet needs a recovery mechanism configured in advance, with its required verification.</p></details>
-      <details><summary>Does Voxy need my seed phrase?<span>+</span></summary><p>This preview never requests a seed phrase or private key. The production recovery design should verify authorization through the wallet’s configured recovery mechanism.</p></details>
-      <details><summary>Can I use it with my wallet today?<span>+</span></summary><p>The recovery console is wired to live contracts: an ENSv2 guardian roster on Sepolia and a VoxyWallet on the EIP-8141 alt-mempool devnet. Starting a recovery submits a real guardian-quorum transaction.</p></details>
+      <details><summary>Does Voxy need my seed phrase?<span>+</span></summary><p>The API never receives your private key. The browser wallet generates a key locally or imports a Sepolia key locally, then encrypts it with your password. Guardians can restore access without the original key.</p></details>
+      <details><summary>Can I use it with my wallet today?<span>+</span></summary><p>Use the built-in Sepolia wallet or locally import a testnet key to enroll. Browser wallet connections handle guardian approvals and replacement controllers. Recovery covers key loss: a stolen original key can still control the EOA and remove its delegation.</p></details>
     </div></section>
     <section class="final-cta shell"><span class="section-kicker">FOR ALL THE “JUST IN CASE” MOMENTS.</span><h2>Give your wallet<br>a way home<span>✳</span></h2><button class="button" data-open="protect">Protect my wallet ${icon("diagonal")}</button><div class="cta-dots" aria-hidden="true"></div></section>
   </main>
   <footer class="site-footer shell"><a class="brand" href="#" aria-label="Voxy home">${logo}</a><span>A name. A way back.</span><a href="#faq">Questions? Start here ${icon("diagonal")}</a><span class="copyright">© ${new Date().getFullYear()} Voxy</span></footer>
-  <dialog id="recovery-dialog" data-lenis-prevent><button class="dialog-close" aria-label="Close recovery preview">${icon("close")}</button><div id="dialog-content"></div></dialog>
+  <dialog id="recovery-dialog" data-lenis-prevent><button class="dialog-close" aria-label="Close wallet">${icon("close")}</button><div id="dialog-content"></div></dialog>
 `;
 
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -134,3 +134,8 @@ dialog.addEventListener("close", () => {
 });
 
 mountExperience({ lenis, reducedMotion });
+
+// A guardian's shared request link opens the real recovery flow directly.
+if (new URL(location.href).searchParams.has("recovery") || new URL(location.href).searchParams.has("account")) {
+  showConsole("recover", document.querySelector('[data-open="recover"]'));
+}

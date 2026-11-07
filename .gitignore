@@ -12,3 +12,6 @@ dist/
 .DS_Store
 deployments.local.json
 out-frame/
+
+# Local conversation context can contain exposed test keys.
+ok.txt

@@ -28,7 +28,12 @@
     "voxy:sign": "node --env-file=.env --import tsx packages/orchestrator/src/sovereign-cli.ts sign",
     "voxy:recover": "node --env-file=.env --import tsx packages/orchestrator/src/sovereign-cli.ts recover",
     "test:api": "forge build --root contracts/devnet && node --import tsx --test apps/api/src/*.test.ts",
-    "test:ens": "forge build --root contracts/devnet --quiet && forge build --root contracts/sepolia --quiet && node --import tsx apps/api/scripts/verify-ens.mjs"
+    "test:ens": "forge build --root contracts/devnet --quiet && forge build --root contracts/sepolia --quiet && node --import tsx apps/api/scripts/verify-ens.mjs",
+    "eoa:build": "forge build --root contracts/sepolia --quiet && node apps/api/scripts/build-eoa-artifacts.mjs",
+    "eoa:deploy:plan": "node --env-file=.env apps/api/scripts/deploy-eoa.mjs",
+    "eoa:deploy": "node --env-file=.env apps/api/scripts/deploy-eoa.mjs --broadcast",
+    "test:eoa": "forge build --root contracts/sepolia --quiet && node --import tsx apps/api/scripts/verify-eoa-local.mjs",
+    "test:eoa:live": "node --env-file=.env apps/web/scripts/verify-live-wallet.mjs --public-write-approved"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.0",

@@ -4,3 +4,4 @@ export * from "./read.js";
 export * from "./schema.js";
 export * from "./snapshot.js";
 export * from "./write.js";
+export * from "./eoa.js";

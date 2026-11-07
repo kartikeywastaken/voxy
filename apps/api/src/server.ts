@@ -1,276 +1,179 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { getAddress, isAddress, isHex, zeroAddress } from "viem";
-import { cancelRecovery, executeRecovery, prepareRecovery, startRecovery } from "./actions.js";
+import { address, hex, record, stringify } from "@voxy/chain";
 import {
-  authorizeGuardians,
-  guardianConfig,
-  guardianIntent,
-  resolveGuardian,
-  setGuardians,
-} from "./guardians.js";
+  accountState,
+  enrollAccount,
+  finalizeEOA,
+  prepareControllerAction,
+  prepareEnrollment,
+  prepareEOARecovery,
+  prepareTransfer,
+  sendControllerAction,
+  sendTransfer,
+  verifiedDeployment,
+} from "./eoa-chain.js";
+import { eoaConfig, eoaReader, publicNetwork } from "./eoa-config.js";
 import {
-  approveRecovery,
-  demoApprove,
-  getRequest,
-  pendingForGuardian,
-  requestRecovery,
-} from "./coordinator.js";
-import { runDemo } from "./eoa7702.js";
+  approveEOARequest,
+  createRecoveryRequest,
+  recoveryStatus,
+  requestsFor,
+  submitPublishedRecovery,
+} from "./eoa-coordinator.js";
+import { operationStatus } from "./eoa-sponsor.js";
+import { attempt } from "./eoa-store.js";
 import { sponsoredWrite } from "./queue.js";
-import { walletState } from "./state.js";
-import { createWallet } from "./wallet.js";
 
-// Cloud hosts (Render/Railway/Fly) inject PORT and need 0.0.0.0; locally we stay on loopback.
 const PORT = Number(process.env.PORT || process.env.VOXY_API_PORT || 8787);
 const HOST = process.env.HOST || (process.env.PORT ? "0.0.0.0" : "127.0.0.1");
-const MAX_BODY = 8192;
-// Optional shared-secret for the state-changing (fund-spending) endpoints. Unset => open, for the
-// local demo. Set VOXY_API_TOKEN to require `Authorization: Bearer <token>` on POSTs.
-const API_TOKEN = process.env.VOXY_API_TOKEN?.trim();
-
-const jsonReplacer = (_: string, v: unknown) => (typeof v === "bigint" ? v.toString() : v);
-
-function send(res: ServerResponse, status: number, body: unknown) {
-  const payload = JSON.stringify(body, jsonReplacer);
+const origins = new Set(
+  (
+    process.env.VOXY_WEB_ORIGINS ||
+    "http://127.0.0.1:5181,http://localhost:5181,http://127.0.0.1:5173,http://localhost:5173"
+  )
+    .split(",")
+    .map((v) => v.trim()),
+);
+function send(req: IncomingMessage, res: ServerResponse, status: number, data: unknown) {
+  const origin = req.headers.origin;
   res.writeHead(status, {
     "content-type": "application/json",
-    "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
-    "access-control-allow-headers": "content-type, authorization",
-  });
-  res.end(payload);
-}
-
-function authorized(req: IncomingMessage): boolean {
-  if (!API_TOKEN) return true;
-  return req.headers.authorization === `Bearer ${API_TOKEN}`;
-}
-
-/** Read a JSON body with a hard running size cap (never buffers more than MAX_BODY). */
-async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const c of req) {
-    const buf = c as Buffer;
-    size += buf.length;
-    if (size > MAX_BODY) throw new Error("Body too large");
-    chunks.push(buf);
-  }
-  if (!chunks.length) return {};
-  const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("Body must be a JSON object");
-  }
-  return parsed as Record<string, unknown>;
-}
-
-const server = createServer(async (req, res) => {
-  try {
-    if (req.method === "OPTIONS") return send(res, 204, {});
-    if (req.method !== "GET" && req.method !== "POST") {
-      return send(res, 405, { error: "method not allowed" });
-    }
-    const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
-    const route = `${req.method} ${url.pathname}`;
-
-    if (route === "GET /api/health") return send(res, 200, { ok: true });
-    if (route === "GET /api/state") {
-      const raw = url.searchParams.get("wallet")?.trim();
-      let w: `0x${string}` | undefined;
-      if (raw) {
-        try {
-          // accept a 0x… address (any case) or a name.eth (resolved on Sepolia)
-          const resolved = await resolveGuardian(raw);
-          if (!resolved) return send(res, 400, { error: "wallet is empty" });
-          w = resolved as `0x${string}`;
-        } catch (e) {
-          return send(res, 400, { error: e instanceof Error ? e.message : "bad wallet" });
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    ...(origin && origins.has(origin)
+      ? {
+          "access-control-allow-origin": origin,
+          vary: "Origin",
+          "access-control-allow-methods": "GET,POST,OPTIONS",
+          "access-control-allow-headers": "content-type",
         }
-      }
-      return send(res, 200, await walletState(w));
-    }
-    // --- recovery coordination hub (reads) ---
-    if (route === "GET /api/recover/request") {
-      const id = url.searchParams.get("id")?.trim();
-      if (!id) return send(res, 400, { error: "id is required" });
-      return send(res, 200, await getRequest(id));
-    }
-    if (route === "GET /api/recover/pending") {
-      const g = url.searchParams.get("guardian")?.trim();
-      if (!g || !isAddress(g, { strict: false })) return send(res, 400, { error: "guardian address required" });
-      return send(res, 200, { requests: await pendingForGuardian(getAddress(g)) });
-    }
-
-    if (route === "GET /api/guardians") {
-      const wallet = url.searchParams.get("wallet");
-      if (wallet && !isAddress(wallet, { strict: false }))
-        return send(res, 400, { error: "Invalid wallet" });
-      return send(res, 200, await guardianConfig(wallet ? getAddress(wallet) : undefined));
-    }
-
-    // --- state-changing routes (spend funds / sign) require auth when a token is configured ---
-    if (
-      route.startsWith("POST /api/recover/") ||
-      route.startsWith("POST /api/guardians/") ||
-      route.startsWith("POST /api/wallet/") ||
-      route.startsWith("POST /api/7702/")
-    ) {
-      if (!authorized(req)) return send(res, 401, { error: "unauthorized" });
-    }
-
-    if (route === "POST /api/7702/run") {
-      const body = await readJson(req);
-      if (typeof body.destination !== "string" || !isAddress(body.destination, { strict: false }))
-        return send(res, 400, { error: "destination must be an address" });
-      return send(res, 200, await sponsoredWrite(() => runDemo(body.destination as string)));
-    }
-
-    if (route === "POST /api/wallet/create") {
-      const body = await readJson(req);
-      const owner = body.owner;
-      if (typeof owner !== "string" || !isAddress(owner, { strict: false })) {
-        return send(res, 400, { error: "owner must be an address" });
-      }
-      return send(res, 200, await sponsoredWrite(() => createWallet(owner)));
-    }
-
-    if (route === "POST /api/guardians/set" || route === "POST /api/guardians/prepare") {
-      const body = await readJson(req);
-      const guardians = body.guardians;
-      if (!Array.isArray(guardians) || guardians.length !== 3) {
-        return send(res, 400, { error: "guardians must be an array of 3 entries" });
-      }
-      const threshold = body.threshold === undefined ? undefined : Number(body.threshold);
-      if (
-        typeof body.wallet !== "string" ||
-        !isAddress(body.wallet, { strict: false }) ||
-        guardians.some((g) => typeof g !== "string")
-      )
-        return send(res, 400, { error: "wallet and guardian strings are required" });
-      const wallet = getAddress(body.wallet);
-      const input = { guardians: guardians as string[], threshold, wallet };
-      if (route.endsWith("/prepare"))
-        return send(res, 200, {
-          message: await guardianIntent(wallet, input.guardians, threshold),
+      : {}),
+  });
+  res.end(stringify(data));
+}
+async function body(req: IncomingMessage) {
+  let size = 0;
+  const chunks: Buffer[] = [];
+  for await (const part of req) {
+    const chunk = Buffer.from(part);
+    size += chunk.length;
+    if (size > 16384) throw new Error("Request body is too large");
+    chunks.push(chunk);
+  }
+  return record(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+}
+const server = createServer(async (req, res) => {
+  const respond = (status: number, data: unknown) => send(req, res, status, data);
+  try {
+    if (req.headers.origin && !origins.has(req.headers.origin))
+      return respond(403, { error: "This web origin is not allowed" });
+    if (req.method === "OPTIONS") return respond(204, {});
+    const url = new URL(req.url || "/", `http://127.0.0.1:${PORT}`);
+    const route = `${req.method} ${url.pathname}`;
+    const ip = req.socket.remoteAddress || "unknown";
+    attempt(`rpc:${ip}`, 120, 60);
+    if (route === "GET /api/health" || route === "GET /api/eoa/config") {
+      try {
+        return respond(200, {
+          ready: true,
+          ...(await verifiedDeployment()),
+          chain: publicNetwork(),
+          publicCoordination: "Arkiv Rabdi",
+          custody: "client-only",
         });
-      if (
-        typeof body.message !== "string" ||
-        typeof body.signature !== "string" ||
-        !isHex(body.signature)
-      )
-        return send(res, 400, { error: "Sign the guardian change with an account owner" });
-      const { message, signature } = body as { message: string; signature: `0x${string}` };
-      return send(
-        res,
-        200,
-        await sponsoredWrite(async () => {
-          await authorizeGuardians({ ...input, message, signature });
-          return setGuardians(input);
-        }),
-      );
-    }
-
-    // --- recovery coordination hub (writes) ---
-    if (route === "POST /api/recover/request") {
-      const body = await readJson(req);
-      if (typeof body.wallet !== "string" || !isAddress(body.wallet, { strict: false }))
-        return send(res, 400, { error: "wallet is required" });
-      if (typeof body.newKey !== "string" || !isAddress(body.newKey, { strict: false }))
-        return send(res, 400, { error: "newKey must be an address" });
-      return send(res, 200, await requestRecovery(getAddress(body.wallet), getAddress(body.newKey)));
-    }
-    if (route === "POST /api/recover/approve") {
-      const body = await readJson(req);
-      if (typeof body.id !== "string") return send(res, 400, { error: "id is required" });
-      if (typeof body.signature !== "string" || !/^0x[0-9a-f]{130}$/i.test(body.signature))
-        return send(res, 400, { error: "signature must be a 65-byte guardian signature" });
-      return send(
-        res,
-        200,
-        await sponsoredWrite(() => approveRecovery(body.id as string, body.signature as `0x${string}`)),
-      );
-    }
-    if (route === "POST /api/recover/demo-approve") {
-      const body = await readJson(req);
-      if (typeof body.id !== "string") return send(res, 400, { error: "id is required" });
-      return send(res, 200, await sponsoredWrite(() => demoApprove(body.id as string)));
-    }
-
-    if (route === "POST /api/recover/start" || route === "POST /api/recover/prepare") {
-      const body = await readJson(req);
-      const newKey = body.newKey;
-      if (typeof newKey !== "string" || !isAddress(newKey, { strict: false })) {
-        return send(res, 400, { error: "newKey must be an address" });
+      } catch {
+        return respond(503, {
+          ready: false,
+          error:
+            "Recovery contracts are not deployed or the configured deployment cannot be verified. Run the deployment preflight.",
+          chain: publicNetwork(),
+        });
       }
-      if (newKey.toLowerCase() === zeroAddress) {
-        return send(res, 400, { error: "newKey cannot be the zero address" });
-      }
-      if (typeof body.wallet !== "string" || !isAddress(body.wallet, { strict: false }))
-        return send(res, 400, { error: "wallet is required" });
-      const wallet = getAddress(body.wallet);
-      if (route.endsWith("/prepare"))
-        return send(res, 200, await prepareRecovery(getAddress(newKey), wallet));
-      if (body.request !== undefined && typeof body.request !== "string")
-        return send(res, 400, { error: "request must be JSON text" });
-      if (
-        body.signatures !== undefined &&
-        (!Array.isArray(body.signatures) ||
-          body.signatures.length > 3 ||
-          body.signatures.some((s) => typeof s !== "string" || !/^0x[0-9a-f]{130}$/i.test(s)))
-      )
-        return send(res, 400, { error: "Expected up to 3 guardian signatures" });
-      return send(
-        res,
+    }
+    if (route === "GET /api/eoa/account")
+      return respond(
         200,
-        await sponsoredWrite(() =>
-          startRecovery(
-            getAddress(newKey),
-            wallet,
-            body.request as string | undefined,
-            body.signatures as `0x${string}`[] | undefined,
-          ),
+        await accountState(
+          address(url.searchParams.get("address")),
+          url.searchParams.has("controller")
+            ? address(url.searchParams.get("controller"))
+            : undefined,
         ),
       );
+    if (route === "GET /api/eoa/native-status") {
+      const hash = hex(url.searchParams.get("hash"), 32);
+      const receipt = await eoaReader()
+        .getTransactionReceipt({ hash })
+        .catch(() => null);
+      return respond(200, {
+        id: hash,
+        hash,
+        phase: receipt ? (receipt.status === "success" ? "confirmed" : "reverted") : "submitting",
+        explorer: `https://sepolia.etherscan.io/tx/${hash}`,
+        error: receipt?.status === "reverted" ? "The transaction reverted" : undefined,
+      });
     }
-
-    if (route === "POST /api/recover/execute") {
-      const body = await readJson(req);
-      if (typeof body.wallet !== "string" || !isAddress(body.wallet, { strict: false }))
-        return send(res, 400, { error: "wallet is required" });
-      return send(
-        res,
+    if (route === "GET /api/eoa/operation")
+      return respond(200, await operationStatus(String(url.searchParams.get("id") || "")));
+    if (route === "GET /api/eoa/recovery")
+      return respond(200, await recoveryStatus(hex(url.searchParams.get("id"), 32)));
+    if (route === "GET /api/eoa/requests")
+      return respond(
         200,
-        await sponsoredWrite(() => executeRecovery(getAddress(body.wallet as string))),
+        await requestsFor(
+          url.searchParams.has("guardian")
+            ? { guardian: address(url.searchParams.get("guardian")) }
+            : { account: address(url.searchParams.get("account")) },
+        ),
       );
-    }
-
-    if (route === "POST /api/recover/cancel") {
-      const body = await readJson(req);
-      if (typeof body.wallet !== "string" || !isAddress(body.wallet, { strict: false }))
-        return send(res, 400, { error: "wallet is required" });
-      return send(
-        res,
+    if (req.method !== "POST") return respond(404, { error: "Route not found" });
+    if (!req.headers["content-type"]?.startsWith("application/json"))
+      return respond(415, { error: "JSON content type required" });
+    attempt(`write:${ip}`, 30, 3600);
+    const input = await body(req);
+    if (route === "POST /api/eoa/enrollment/prepare")
+      return respond(200, await prepareEnrollment(input));
+    if (route === "POST /api/eoa/enrollment")
+      return respond(200, await sponsoredWrite(() => enrollAccount(input)));
+    if (route === "POST /api/eoa/recovery/prepare")
+      return respond(
         200,
-        await sponsoredWrite(() => cancelRecovery(getAddress(body.wallet as string))),
+        await prepareEOARecovery(address(input.account), address(input.newController)),
       );
-    }
-
-    return send(res, 404, { error: "not found" });
-  } catch (err) {
-    // Surface a readable message without leaking RPC credentials or stack traces.
+    if (route === "POST /api/eoa/recovery/request")
+      return respond(200, await sponsoredWrite(() => createRecoveryRequest(input)));
+    if (route === "POST /api/eoa/recovery/approve")
+      return respond(
+        200,
+        await sponsoredWrite(() => approveEOARequest(hex(input.id, 32), hex(input.signature, 65))),
+      );
+    if (route === "POST /api/eoa/recovery/submit")
+      return respond(200, await sponsoredWrite(() => submitPublishedRecovery(hex(input.id, 32))));
+    if (route === "POST /api/eoa/recovery/finalize")
+      return respond(200, await sponsoredWrite(() => finalizeEOA(address(input.account))));
+    if (route === "POST /api/eoa/controller/prepare")
+      return respond(200, await prepareControllerAction(input));
+    if (route === "POST /api/eoa/controller")
+      return respond(200, await sponsoredWrite(() => sendControllerAction(input)));
+    if (route === "POST /api/eoa/transfer/prepare")
+      return respond(200, await prepareTransfer(input));
+    if (route === "POST /api/eoa/transfer")
+      return respond(200, await sponsoredWrite(() => sendTransfer(input)));
+    return respond(410, {
+      error:
+        "The server-custodied demo and smart-account creation routes have been removed. Use the EIP-7702 wallet flow.",
+    });
+  } catch (error) {
+    // Provider diagnostics may contain RPC credentials; only application errors reach the client.
     const message =
-      err &&
-      typeof err === "object" &&
-      "shortMessage" in err &&
-      typeof err.shortMessage === "string"
-        ? err.shortMessage
-        : err instanceof Error
-          ? err.message
-          : "server error";
-    return send(res, 500, { error: message.slice(0, 300) });
+      error instanceof Error && !("shortMessage" in error) && !/https?:\/\//i.test(error.message)
+        ? error.message
+        : "The network operation could not be verified. Keep its operation ID and retry the status check.";
+    return respond(/Too many/.test(message) ? 429 : 400, { error: message.slice(0, 240) });
   }
 });
-
-server.listen(PORT, HOST, () => {
-  console.log(`voxy api listening on http://${HOST}:${PORT}${API_TOKEN ? " (auth required)" : ""}`);
-});
+server.requestTimeout = 120000;
+server.headersTimeout = 15000;
+server.listen(PORT, HOST, () =>
+  console.log(`Voxy EIP-7702 API listening on http://${HOST}:${PORT}`),
+);

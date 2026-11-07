@@ -233,3 +233,18 @@ dialog.vc-dialog .vc-req {
 }
 dialog.vc-dialog .vc-req .button { width: 100%; margin-top: 12px; }
 dialog.vc-dialog #vc-g-list { margin: 6px 0; }
+
+.vw-address { display: block; margin: 16px 0; font: 13px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; padding: 12px; background: #eeeee7; border-radius: 6px; }
+.vw-balance { margin-top: 12px; font-size: clamp(24px, 5vw, 36px); font-weight: 500; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.vw-balance small { display: block; margin-top: 6px; font-size: 14px; color: var(--vc-muted); }
+.vw-vaults { display: grid; gap: 10px; margin: 20px 0; }
+.vw-vault { width: 100%; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; padding: 16px; border: 1px solid var(--vc-line); border-radius: 8px; background: #fff; color: #37372f; text-align: left; font-size: 14px; }
+.vw-file { display: block; margin: 22px 0; font-size: 14px; }
+.vw-file input { margin-top: 8px; }
+.vw-check { display: flex; align-items: center; gap: 10px; margin: 24px 0; font-size: 14px; }
+.vc-dialog .vw-check input { width: 18px; height: 18px; }
+.vw-transfer { margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--vc-line); }
+.vw-transfer .vc-gform { margin-top: 14px !important; }
+.vc-dialog .button:disabled { opacity: .5; cursor: not-allowed; }
+.vc-dialog a { color: #a13d25; font-size: 14px; }
+.vc-dialog .vc-gform input[type=password] { font-family: inherit; }

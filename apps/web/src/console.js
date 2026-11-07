@@ -1,975 +1,322 @@
 import "./console.css";
+import { createPublicClient, encodeFunctionData, getAddress, hashTypedData, http, isAddress, keccak256, parseEther } from "viem";
+import { sepolia } from "viem/chains";
+import { normalize } from "viem/ens";
+import { ensRosterAbi, recoveryAccountAbi } from "@voxy/chain/eoa-abis";
+import { approvedDeployment } from "./wallet/deployment.js";
+import { authorizationData, enrollmentData, executionData, recoveryData, validateExpiry } from "./wallet/protocol.js";
+import { eoaDomain, eoaTypes, eoaRecoveryHash, parseEOARecovery } from "@voxy/chain/eoa";
 import { api, short } from "./api.js";
+import { downloadVault, encryptWallet, listVaults, saveVault, unlockWallet, validateVault } from "./wallet/vault.js";
+import { prepareNativeTransfer, sendNativeTransfer } from "./wallet/native.js";
+import { connectProvider, discoverProviders, signBrowser } from "./wallet/signing.js";
 
 const escape = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-const isAddress = (v) => /^0x[0-9a-fA-F]{40}$/.test(v.trim());
-const isGuardianInput = (v) => isAddress(v) || /\.eth$/i.test(v.trim()) || v.trim() === "";
-const majorityOf = (n) => (n <= 0 ? 1 : Math.floor(n / 2) + 1);
-// Test/placeholder addresses are all one repeated hex char (0x3333…3333, 0x2222…2222).
-const isPlaceholder = (a) => /^0x([0-9a-f])\1{39}$/i.test((a || "").trim());
-const isZero = (a) => /^0x0+$/.test((a || "").trim());
-
-// Discover injected wallets via EIP-6963 (Rainbow, MetaMask, Rabby, …). Falls back to legacy
-// window.ethereum. Returns [{ info:{name,…}, provider }]. No deps — raw browser events.
-function discoverWallets(timeout = 300) {
-  return new Promise((resolve) => {
-    const map = new Map();
-    const onAnnounce = (e) => {
-      const d = e.detail;
-      if (d?.info?.uuid) map.set(d.info.uuid, d);
-    };
-    window.addEventListener("eip6963:announceProvider", onAnnounce);
-    window.dispatchEvent(new Event("eip6963:requestProvider"));
-    setTimeout(() => {
-      window.removeEventListener("eip6963:announceProvider", onAnnounce);
-      let list = [...map.values()];
-      if (!list.length && window.ethereum?.request) {
-        const w = window.ethereum;
-        const name = w.isRainbow ? "Rainbow" : w.isMetaMask ? "MetaMask" : "Injected wallet";
-        list = [{ info: { name, uuid: "legacy" }, provider: w }];
-      }
-      resolve(list);
-    }, timeout);
-  });
-}
-async function requestAccount(provider) {
-  const accounts = await provider.request({ method: "eth_requestAccounts" });
-  const addr = accounts?.[0];
-  if (!addr) throw new Error("No account was selected in your wallet.");
-  return addr;
-}
-
-const ext = (href) =>
-  href
-    ? `<a class="vc-ext" href="${href}" target="_blank" rel="noopener" aria-label="View on explorer">↗</a>`
-    : "";
-const chip = (v, title) => `<code class="vc-chip" title="${title ?? v}">${short(v)}</code>`;
-const ownerChip = (a) => `${chip(a)}${isPlaceholder(a) ? ' <span class="vc-dim">test</span>' : ""}`;
-
-function row(label, value, cls = "") {
-  return `<div class="vc-row"><span class="vc-label">${label}</span><span class="vc-value ${cls}">${value}</span></div>`;
-}
-
-const TABS = [
-  ["overview", "Overview"],
-  ["guardians", "Guardians"],
-  ["recover", "Recover"],
-  ["surfaces", "Surfaces"],
-];
+const addressChip = (value) => `<code class="vc-chip" title="${escape(value)}">${escape(short(value))}</code>`;
+const fullAddress = (value) => `<code class="vw-address">${escape(value)}</code>`;
+const txLink = (operation) => operation?.explorer ? `<a href="${escape(operation.explorer)}" target="_blank" rel="noopener noreferrer">View transaction ${escape(short(operation.hash))}</a>` : "";
+const errorMessage = (error) => error?.shortMessage || error?.message || "The operation could not be verified.";
 
 export function mountConsole(container, mode) {
   const dialog = container.closest("dialog");
   dialog?.classList.add("vc-dialog");
-  const view = {
-    tab: mode === "recover" ? "recover" : "overview",
-    wallet: undefined,
-    walletName: undefined,
-    loaded: false,
-    draft: null,
-    provider: null,
-    owner: null,
-    guardian: null,
-    recovery: null,
-  };
-  let timer;
-  let pollTimer;
-  let S;
-  let G;
-  const clearTimer = () => timer && clearInterval(timer);
-  const clearPoll = () => pollTimer && clearInterval(pollTimer);
-  function startPoll() {
-    clearPoll();
-    const id = view.recovery?.id;
-    if (!id) return;
-    pollTimer = setInterval(async () => {
-      try {
-        const st = await api.getRecoveryRequest(id);
-        const wasSubmitted = view.recovery?.status?.submitted;
-        if (!view.recovery) return;
-        view.recovery.status = st;
-        const el = container.querySelector("#vc-approved");
-        if (el) el.textContent = st.approved;
-        if (st.submitted && !wasSubmitted) {
-          clearPoll();
-          render();
-        }
-      } catch {
-        /* transient RPC hiccup — keep polling */
-      }
-    }, 2500);
+  let alive = true;
+  let sequence = 0;
+  let poll;
+  let local = null;
+  let connection = null;
+  let network;
+  let activeAccount;
+  let providerCleanup;
+  let idle;
+  const url = () => new URL(location.href);
+  const stop = () => { clearTimeout(poll); sequence++; };
+  const setURL = (changes) => { const next = url(); for (const [key, value] of Object.entries(changes)) value ? next.searchParams.set(key, value) : next.searchParams.delete(key); history.replaceState(null, "", next); };
+  const go = (page) => { stop(); setURL({ "voxy-mode": page, recovery: null, digest: null, operation: null, native: null }); if (page === "recover") recoveryEntry(); else if (page === "guardian") guardianEntry(); else walletHome(); };
+  function frame(title, html, selected = "wallet") {
+    if (!alive) return;
+    container.innerHTML = `<div class="vc-head"><span class="preview-label">Voxy · Sepolia</span><h2 class="vc-title">${title}</h2><nav class="vc-tabs" aria-label="Wallet sections">${[["wallet", "Wallet"], ["recover", "Recover access"], ["guardian", "Guardian approvals"]].map(([id, label]) => `<button type="button" class="vc-tab ${selected === id ? "active" : ""}" data-page="${id}" ${selected === id ? 'aria-current="page"' : ""}>${label}</button>`).join("")}</nav></div><div class="vc-panel">${html}</div><div class="vc-foot"><span class="vc-dim">Sepolia testnet only</span><span class="vc-dim">Keys stay on your device</span></div>`;
+    container.querySelectorAll("[data-page]").forEach((button) => button.addEventListener("click", () => go(button.dataset.page)));
   }
-  const draftFrom = (gcfg) => {
-    if (gcfg.sharedLegacy) return [""];
-    const live = gcfg.slots.map((s) => s.guardian).filter((a) => a && !isZero(a));
-    return live.length ? live : [""];
-  };
-
-  // Connect flow shared by the entry gate and the EOA screen: discover wallets, connect one
-  // (or show a picker when several are installed), then hand back the address.
-  async function doConnect(btn, errEl, pickerEl, onAddr) {
-    const label = btn.textContent;
-    const reset = () => {
-      btn.disabled = false;
-      btn.textContent = label;
-    };
-    btn.disabled = true;
-    btn.textContent = "Connecting…";
-    if (errEl) errEl.textContent = "";
-    if (pickerEl) pickerEl.innerHTML = "";
-    const wallets = await discoverWallets().catch(() => []);
-    if (!wallets.length) {
-      if (errEl) errEl.textContent = "No browser wallet found. Install Rainbow, MetaMask, or another wallet.";
-      reset();
-      return;
-    }
-    const connect = async (w) => {
-      try {
-        const addr = await requestAccount(w.provider);
-        view.walletName = w.info.name;
-        view.provider = w.provider;
-        view.owner = addr;
-        await onAddr(addr);
-      } catch (e) {
-        if (errEl) errEl.textContent = e.message;
-        reset();
-      }
-    };
-    if (wallets.length === 1) {
-      await connect(wallets[0]);
-      return;
-    }
-    reset();
-    if (pickerEl) {
-      pickerEl.innerHTML = `<p class="vc-fine">Choose a wallet:</p><div class="vc-wallets-list">${wallets
-        .map((w, i) => `<button type="button" class="vc-wallet-pick" data-i="${i}">${escape(w.info.name)}</button>`)
-        .join("")}</div>`;
-      pickerEl
-        .querySelectorAll(".vc-wallet-pick")
-        .forEach((b) => b.addEventListener("click", () => connect(wallets[Number(b.dataset.i)])));
-    }
+  function touch() { clearTimeout(idle); idle = setTimeout(() => { if (!local) return; local = null; if (alive) notice(new Error("The local wallet locked after five minutes. Unlock it before signing another action.")); }, 5 * 60 * 1000); }
+  container.addEventListener("pointerdown", touch);
+  container.addEventListener("keydown", touch);
+  function notice(message) { const node = container.querySelector("#vw-error"); if (node) { node.textContent = errorMessage(message); node.setAttribute("role", "alert"); } }
+  async function action(button, label, work) {
+    const old = button.textContent; button.disabled = true; button.textContent = label;
+    try { await work(); } catch (error) { notice(error); }
+    finally { if (button.isConnected) { button.disabled = false; button.textContent = old; } }
   }
-
-  async function switchToDevnet() {
-    const chain = S.ownerActions.chain;
-    const current = await view.provider.request({ method: "eth_chainId" });
-    if (current.toLowerCase() === chain.chainId.toLowerCase()) return;
-    try {
-      await view.provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: chain.chainId }] });
-    } catch (error) {
-      if (error.code !== 4902) throw error;
-      await view.provider.request({ method: "wallet_addEthereumChain", params: [chain] });
-      await view.provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: chain.chainId }] });
-    }
-  }
-
-  /* ---------------------------------------------------------- entry gate */
-  function renderEntry() {
-    clearTimer();
-    const recover = mode === "recover";
-    container.innerHTML = recover
-      ? `
-      <div class="vc-head">
-        <span class="preview-label">Voxy recovery</span>
-        <h2 class="vc-title">Recover an account</h2>
-      </div>
-      <form id="vc-enter" class="vc-enter" novalidate>
-        <label for="vc-wallet">Address of the account you lost access to</label>
-        <div class="vc-walletbar-row">
-          <input id="vc-wallet" placeholder="0x… the Voxy account you're recovering" autocomplete="off" spellcheck="false" />
-          <button class="button button-small" type="submit">Find account</button>
-        </div>
-        <p id="vc-wallet-err" class="error" role="alert"></p>
-        <p class="vc-fine"><b>You don't need the lost wallet or its keys.</b> Enter the account's address — your guardians approve a new owner you control, and after a short wait you are back in. If you only have your old owner address, enter it and we'll find the accounts it owned.</p>
-        <div class="vc-entry-links">
-          <button type="button" class="text-button" id="vc-7702">▶ Live EIP-7702 recovery (real, end-to-end) →</button>
-          <button type="button" class="text-button" id="vc-guardian-mode">I'm a guardian — approve a request →</button>
-        </div>
-      </form>
-      <div class="vc-foot">
-        <span class="vc-dim">Live reads · Sepolia + alt-mempool devnet</span>
-      </div>`
-      : `
-      <div class="vc-head">
-        <span class="preview-label">Voxy recovery</span>
-        <h2 class="vc-title">Protect a wallet</h2>
-      </div>
-      <form id="vc-enter" class="vc-enter" novalidate>
-        <label for="vc-wallet">Which wallet do you want to protect?</label>
-        <button type="button" class="button" id="vc-connect">Connect wallet</button>
-        <div id="vc-wallets" class="vc-wallets"></div>
-        <div class="vc-or"><span>or enter an address</span></div>
-        <div class="vc-walletbar-row">
-          <input id="vc-wallet" placeholder="0x… address or name.eth" autocomplete="off" spellcheck="false" />
-          <button class="button button-small" type="submit">Load</button>
-        </div>
-        <p id="vc-wallet-err" class="error" role="alert"></p>
-        <p class="vc-fine">Connect your wallet, or paste an account address, to manage the Voxy accounts it owns or create one.</p>
-        <button type="button" class="text-button" id="vc-7702">▶ Live EIP-7702 recovery (real, end-to-end) →</button>
-        <button type="button" class="text-button" id="vc-guardian-mode">I'm a guardian — approve a request →</button>
-      </form>
-      <div class="vc-foot">
-        <span class="vc-dim">Live reads · Sepolia + alt-mempool devnet</span>
-      </div>`;
-    const go = (wallet) => {
-      view.wallet = wallet;
-      view.loaded = true;
-      load();
-    };
-    container.querySelector("#vc-enter").addEventListener("submit", (e) => {
-      e.preventDefault();
-      const v = container.querySelector("#vc-wallet").value.trim();
-      const err = container.querySelector("#vc-wallet-err");
-      if (!v || !isGuardianInput(v)) {
-        err.textContent = "Enter a 0x… address or a name.eth.";
-        return;
-      }
-      go(v);
-    });
-    container.querySelector("#vc-connect")?.addEventListener("click", (e) =>
-      doConnect(
-        e.currentTarget,
-        container.querySelector("#vc-wallet-err"),
-        container.querySelector("#vc-wallets"),
-        (addr) => go(addr),
-      ),
-    );
-    container.querySelector("#vc-guardian-mode")?.addEventListener("click", renderGuardian);
-    container.querySelector("#vc-7702")?.addEventListener("click", render7702);
-  }
-
-  /* ------------------------------ live EIP-7702 recovery of a real wallet */
-  function render7702() {
-    clearTimer();
-    clearPoll();
-    container.innerHTML = `
-      <div class="vc-head">
-        <span class="preview-label">Voxy · EIP-7702</span>
-        <h2 class="vc-title">Recover a real wallet</h2>
-      </div>
-      <div class="vc-enter">
-        <p class="vc-fine">The real thing, end to end: Voxy spins up a normal wallet, funds it with Sepolia ETH, adds recovery via <b>EIP-7702</b> (no new account, no moving funds), then guardians recover it and the funds land in the wallet you choose. Every step is a live Sepolia transaction — no simulation.</p>
-        <label for="vc-7702-dest">Recover the funds into (your MetaMask on Sepolia)</label>
-        <input id="vc-7702-dest" value="0x25dCDf4b5eb269565A5fA92EcEfea304781a3538" placeholder="0x… address" autocomplete="off" spellcheck="false" />
-        <p id="vc-7702-err" class="error" role="alert"></p>
-        <button type="button" class="button" id="vc-7702-run">Run the live recovery →</button>
-        <div id="vc-7702-out"></div>
-        <button type="button" class="text-button" id="vc-7702-back">← Back</button>
-      </div>
-      <div class="vc-foot"><span class="vc-dim">Live on Sepolia · EIP-7702 · real transactions</span></div>`;
-    container.querySelector("#vc-7702-back").addEventListener("click", renderEntry);
-    container.querySelector("#vc-7702-run").addEventListener("click", async (e) => {
-      const btn = e.currentTarget;
-      const dest = container.querySelector("#vc-7702-dest").value.trim();
-      const err = container.querySelector("#vc-7702-err");
-      if (!isAddress(dest)) {
-        err.textContent = "Enter a valid 0x… address.";
-        return;
-      }
-      err.textContent = "";
-      btn.disabled = true;
-      btn.textContent = "Running live on Sepolia… (~60–90s)";
-      const out = container.querySelector("#vc-7702-out");
-      out.innerHTML = `<div class="vc-note"><span class="status-dot"></span> Creating a wallet, funding it, protecting via EIP-7702, guardians recovering, sweeping the funds — all live…</div>`;
-      try {
-        const r = await api.run7702(dest);
-        const tx = (label, t) =>
-          t ? `<a href="${t.explorer}" target="_blank" rel="noopener">${label} · ${short(t.hash)} ↗</a>` : "";
-        out.innerHTML = `<div class="vc-note vc-ok-note"><b>✓ Recovered — ${r.recover.moved} ETH landed in ${short(r.recover.destination)}.</b>
-          <div class="vc-txlist">
-            ${tx("1 · wallet funded", r.created.fundTx)}
-            ${tx("2 · protected (EIP-7702)", r.protect.protectTx)}
-            ${tx("3 · guardians requested recovery", r.recover.requestTx)}
-            ${tx("4 · recovery executed", r.recover.executeTx)}
-            ${tx("5 · funds swept to safe wallet", r.recover.moveTx)}
-          </div>
-          <p class="vc-fine">Lost wallet <code>${short(r.created.address)}</code> → safe wallet <code>${short(r.recover.destination)}</code> (${r.recover.destinationBefore} → ${r.recover.destinationAfter} ETH). Open it in MetaMask on Sepolia to see the ETH arrive.</p></div>`;
-        btn.disabled = false;
-        btn.textContent = "Run again →";
-      } catch (e2) {
-        out.innerHTML = `<div class="vc-note vc-warn">${e2.message}</div>`;
-        btn.disabled = false;
-        btn.textContent = "Run the live recovery →";
-      }
+  function connectionLabel() { return connection ? `${escape(connection.name)}: ${addressChip(connection.address)}` : "No signing wallet connected"; }
+  async function connect(button, next) {
+    await action(button, "Finding wallets…", async () => {
+      const providers = await discoverProviders();
+      if (!providers.length) throw new Error("Install a browser wallet for guardian approvals, or use an unlocked Voxy wallet.");
+      const choose = async (choice) => {
+        const account = await connectProvider(choice.provider);
+        providerCleanup?.();
+        connection = { ...choice, name: choice.info.name, address: account };
+        const changed = (accounts) => { if (connection?.provider !== choice.provider) return; connection.address = accounts[0] || ""; if (!connection.address) connection = null; };
+        const disconnected = () => { if (connection?.provider === choice.provider) connection = null; };
+        choice.provider.on?.("accountsChanged", changed); choice.provider.on?.("disconnect", disconnected);
+        providerCleanup = () => { choice.provider.removeListener?.("accountsChanged", changed); choice.provider.removeListener?.("disconnect", disconnected); };
+        await next();
+      };
+      if (providers.length === 1) return choose(providers[0]);
+      const picker = container.querySelector("#vw-picker");
+      picker.innerHTML = `<div class="vc-wallets-list">${providers.map((provider, i) => `<button type="button" class="vc-wallet-pick" data-provider="${i}">${escape(provider.info.name)}</button>`).join("")}</div>`;
+      picker.querySelectorAll("[data-provider]").forEach((item) => item.addEventListener("click", () => action(item, "Connecting…", () => choose(providers[Number(item.dataset.provider)]))));
     });
   }
+  async function resolveGuardians(values) {
+    const reader = createPublicClient({ chain: sepolia, transport: http(network.rpcUrls[0]) });
+    return Promise.all(values.map(async (value) => {
+      if (isAddress(value, { strict: false })) return getAddress(value);
+      if (!value.toLowerCase().endsWith(".eth")) throw new Error("Enter a wallet address or Sepolia ENS name.");
+      const address = await reader.getEnsAddress({ name: normalize(value) });
+      if (!address) throw new Error("That ENS name does not resolve on Sepolia.");
+      return getAddress(address);
+    }));
+  }
+  function guardianCalls(prepared, account, guardians) {
+    if (prepared.actionInput.account.toLowerCase() !== account.toLowerCase() || prepared.actionInput.action !== "guardians" || prepared.actionInput.guardians.length !== guardians.length || prepared.actionInput.guardians.some((g, i) => getAddress(g) !== getAddress(guardians[i]))) throw new Error("The guardian update differs from your chosen addresses.");
+    const values = [...guardians]; while (values.length < 3) values.push("0x0000000000000000000000000000000000000000");
+    const expiresAt = validateExpiry(prepared.actionInput.expiresAt);
+    return [{ to: approvedDeployment.rosterSource, value: 0n, data: encodeFunctionData({ abi: ensRosterAbi, functionName: "setGuardians", args: [values, Math.floor(guardians.length / 2) + 1, expiresAt] }) }];
+  }
+  async function sign(typedData, account) {
+    touch();
+    if (local?.address.toLowerCase() === account.toLowerCase()) return local.signTypedData(typedData);
+    if (connection?.address?.toLowerCase() !== account.toLowerCase()) throw new Error("Connect the wallet that must sign this action.");
+    return signBrowser(connection.provider, typedData, account, network);
+  }
+  function signerAddress() { return connection?.address || local?.address; }
+  function accountSigner(account) { return local?.address.toLowerCase() === account.toLowerCase() ? local.address : signerAddress(); }
 
-  /* --------------------------------- guardian: approve requests waiting for me */
-  async function renderGuardian() {
-    clearTimer();
-    clearPoll();
-    container.innerHTML = `
-      <div class="vc-head">
-        <span class="preview-label">Voxy recovery</span>
-        <h2 class="vc-title">Approve a recovery</h2>
-      </div>
-      <div class="vc-enter">
-        <p class="vc-fine">Someone you guard is recovering their account. Connect the wallet you were added as a guardian with — Voxy shows the requests waiting for your approval and you sign each in one click.</p>
-        <button type="button" class="button" id="vc-g-connect">Connect guardian wallet</button>
-        <div id="vc-g-wallets" class="vc-wallets"></div>
-        <p id="vc-g-err" class="error" role="alert"></p>
-        <div id="vc-g-list"></div>
-        <button type="button" class="text-button" id="vc-g-back">← Back</button>
-      </div>
-      <div class="vc-foot"><span class="vc-dim">Live reads · Sepolia + alt-mempool devnet</span></div>`;
-    container.querySelector("#vc-g-back").addEventListener("click", renderEntry);
-    container.querySelector("#vc-g-connect").addEventListener("click", async (e) => {
-      const btn = e.currentTarget;
-      const err = container.querySelector("#vc-g-err");
-      err.textContent = "";
-      try {
-        if (!view.provider) {
-          const wallets = await discoverWallets();
-          if (!wallets.length) throw new Error("No wallet found. Install MetaMask/Rainbow to approve.");
-          if (wallets.length > 1) {
-            await doConnect(btn, err, container.querySelector("#vc-g-wallets"), (addr) =>
-              loadGuardianRequests(addr),
-            );
-            return;
-          }
-          view.provider = wallets[0].provider;
+  async function walletHome() {
+    stop();
+    if (activeAccount) return showAccount(activeAccount);
+    let vaults;
+    try { vaults = await listVaults(); } catch (error) { frame("Your wallet", `<p class="vc-note vc-warn">${escape(errorMessage(error))}</p><div id="vw-error" class="error"></div>`); return; }
+    frame("Your wallet", `<div class="vc-section-intro"><h3>Your address. Your recovery.</h3><p>Create a normal Ethereum account here, or import a Sepolia key locally. Adding recovery keeps the same address and funds.</p></div>${vaults.length ? `<div class="vw-vaults">${vaults.map((vault, index) => `<button type="button" class="vw-vault" data-vault="${index}"><span>${addressChip(vault.address)}</span><span>${local?.address === vault.address ? "Unlocked" : "Unlock wallet"}</span></button>`).join("")}</div>` : ""}<div class="vc-enter-actions"><button type="button" class="button" id="vw-create">Create wallet</button><button type="button" class="text-button" id="vw-import-key">Import Sepolia key</button></div><label class="vw-file">Restore encrypted backup<input type="file" id="vw-import-backup" accept="application/json,.json" /></label><form id="vw-open" class="vc-gform"><label for="vw-address">Open a protected account by address</label><input id="vw-address" placeholder="0x…" autocomplete="off" spellcheck="false" /><button class="text-button" type="submit">Open account</button></form><p id="vw-error" class="error" role="alert"></p>`);
+    container.querySelectorAll("[data-vault]").forEach((button) => button.addEventListener("click", () => unlockScreen(vaults[Number(button.dataset.vault)])));
+    container.querySelector("#vw-create").onclick = () => createScreen(false);
+    container.querySelector("#vw-import-key").onclick = () => createScreen(true);
+    container.querySelector("#vw-import-backup").onchange = async (event) => {
+      try { const file = event.target.files?.[0]; if (!file) return; if (file.size > 10000) throw new Error("This backup file is too large."); const vault = validateVault(JSON.parse(await file.text())); await saveVault(vault); unlockScreen(vault); } catch (error) { notice(error); }
+    };
+    container.querySelector("#vw-open").onsubmit = (event) => { event.preventDefault(); const account = container.querySelector("#vw-address").value.trim(); if (!isAddress(account, { strict: false })) return notice(new Error("Enter a valid wallet address.")); activeAccount = account; showAccount(account); };
+  }
+  function createScreen(importing) {
+    stop();
+    frame(importing ? "Import a Sepolia wallet" : "Create your wallet", `<form id="vw-create-form" class="vc-gform"><p class="vc-fine">The private key is generated or imported on this device. Voxy’s API receives only public addresses and signed actions.</p>${importing ? '<label for="vw-private-key">Sepolia private key</label><input id="vw-private-key" type="password" autocomplete="off" spellcheck="false" /><p class="vc-fine">Use a testnet-only key. Never import a key that secures real assets.</p>' : ""}<label for="vw-password">Encryption password</label><input id="vw-password" type="password" minlength="12" autocomplete="new-password" required /><label for="vw-password-again">Confirm password</label><input id="vw-password-again" type="password" autocomplete="new-password" required /><p class="vc-fine">At least 12 characters. This password encrypts your backup; Voxy cannot reset it.</p><p id="vw-error" class="error" role="alert"></p><button class="button" type="submit">${importing ? "Encrypt and import" : "Create encrypted wallet"}</button></form>`);
+    container.querySelector("#vw-create-form").onsubmit = (event) => { event.preventDefault(); const button = event.currentTarget.querySelector("button"); action(button, "Encrypting on your device…", async () => {
+      const password = container.querySelector("#vw-password").value;
+      if (password !== container.querySelector("#vw-password-again").value) throw new Error("The passwords do not match.");
+      const created = await encryptWallet(password, importing ? container.querySelector("#vw-private-key").value.trim() : undefined);
+      await saveVault(created.vault); local = created.account; activeAccount = local.address;
+      backupScreen(created.vault);
+    }); };
+  }
+  function backupScreen(vault) {
+    frame("Save your wallet backup", `<div class="vc-section-intro"><h3>Keep this encrypted file somewhere safe</h3><p>You will need its password to unlock it. Your encrypted vault is also saved in this browser.</p></div>${fullAddress(vault.address)}<div class="vc-enter-actions"><button class="button" id="vw-download">Download encrypted backup</button></div><label class="vw-check"><input type="checkbox" id="vw-saved" /> I saved my encrypted backup.</label><p id="vw-error" class="error"></p><button class="button" id="vw-continue" disabled>Open my wallet</button>`);
+    container.querySelector("#vw-download").onclick = () => downloadVault(vault);
+    container.querySelector("#vw-saved").onchange = (event) => { container.querySelector("#vw-continue").disabled = !event.target.checked; };
+    container.querySelector("#vw-continue").onclick = () => showAccount(vault.address);
+  }
+  function unlockScreen(vault) {
+    frame("Unlock your wallet", `<form id="vw-unlock-form" class="vc-gform">${fullAddress(vault.address)}<label for="vw-unlock-password">Encryption password</label><input id="vw-unlock-password" type="password" autocomplete="current-password" required /><p id="vw-error" class="error" role="alert"></p><button class="button" type="submit">Unlock on this device</button><button class="text-button" id="vw-download" type="button">Download encrypted backup</button></form>`);
+    container.querySelector("#vw-download").onclick = () => downloadVault(vault);
+    container.querySelector("#vw-unlock-form").onsubmit = (event) => { event.preventDefault(); action(event.currentTarget.querySelector("button"), "Unlocking…", async () => { local = await unlockWallet(vault, container.querySelector("#vw-unlock-password").value); activeAccount = local.address; await showAccount(activeAccount); }); };
+  }
+  async function showAccount(account) {
+    stop(); const version = sequence;
+    activeAccount = account; setURL({ account, recovery: null, digest: null, operation: null, native: null, "voxy-mode": "wallet" });
+    frame("Your wallet", '<div class="vc-loading">Reading the account on Sepolia…</div>');
+    try {
+      const state = await api.account(account, accountSigner(account));
+      if (!alive || version !== sequence) return;
+      const usable = state.configured && !state.frozen && state.guardians.filter((g) => !/^0x0+$/.test(g)).length >= state.threshold;
+      const canSign = local?.address.toLowerCase() === account.toLowerCase() || state.controls;
+      frame("Your wallet", `<section class="vc-summary"><div><span class="vc-state ${usable ? "vc-ok" : ""}">${state.configured ? state.frozen ? "Recovery paused" : usable ? "Recovery enabled" : "Guardians need renewal" : state.otherDelegation ? "Different delegation detected" : "Recovery not enabled"}</span><div class="vw-balance">${escape(state.balanceETH)} <small>Sepolia ETH</small></div></div></section>${fullAddress(state.account)}<div class="vc-enter-actions"><button class="text-button" id="vw-copy">Copy address</button><a href="${escape(state.explorer)}" target="_blank" rel="noopener noreferrer">View on Etherscan</a><button class="text-button" id="vw-refresh">Refresh</button>${local ? '<button class="text-button" id="vw-lock">Lock local wallet</button>' : '<button class="text-button" id="vw-unlock-local">Unlock local wallet</button>'}</div>${state.configured ? `<div class="vc-roster-summary"><h3>Recovery guardians</h3><p class="vc-fine">${state.threshold} approvals · ${state.delay / 60}-minute waiting period</p><div class="vc-guardian-list">${state.guardians.filter((g) => !/^0x0+$/.test(g)).map((g, i) => `<div><span>Guardian ${i + 1}</span>${addressChip(g)}</div>`).join("")}</div><p class="vc-fine">Guardian slots expire ${escape(new Date(Number(state.expiresAt) * 1000).toLocaleDateString())}. Renew them before that date.</p>${canSign ? `<div class="vc-enter-actions"><button class="text-button" id="vw-edit-guardians">Manage guardians</button><button class="text-button" id="vw-freeze">${state.frozen ? "Resume recovery" : "Pause recovery"}</button>${state.pending ? '<button class="text-button" id="vw-cancel-recovery">Cancel pending recovery</button>' : ""}</div>` : ""}<p class="vc-fine">Your address and funds remain here. Recovery adds a controller; the original key remains authoritative.</p></div>` : `<p class="vc-fine">Fund this address with Sepolia ETH from a faucet or another wallet. Voxy sponsors recovery enrollment gas.</p>`}${!state.configured && !state.otherDelegation && local?.address.toLowerCase() === account.toLowerCase() ? '<div class="vc-enter-actions"><button class="button" id="vw-protect">Choose recovery guardians</button></div>' : ""}${state.otherDelegation ? '<p class="vc-note vc-warn">Enrollment will not replace another account delegation.</p>' : ""}${state.configured || local?.address.toLowerCase() === account.toLowerCase() ? `<div class="vw-transfer"><h3>Send Sepolia ETH</h3><p class="vc-fine">${canSign ? "Review a transfer, then sign it with a controller. The sponsor cannot move funds without that signature." : "Connect a controller of this account to authorize a transfer."}</p><p class="vc-fine">${connectionLabel()}</p><button class="text-button" id="vw-connect-controller">Connect a controller</button><div id="vw-picker"></div>${canSign ? '<form id="vw-transfer-form" class="vc-gform"><label for="vw-to">Recipient address</label><input id="vw-to" placeholder="0x…" autocomplete="off" spellcheck="false" /><label for="vw-amount">Amount in ETH</label><input id="vw-amount" inputmode="decimal" autocomplete="off" /><button class="text-button" id="vw-max" type="button">Use available balance</button><button class="button" type="submit">Review transfer</button></form>' : ""}</div>` : ""}<p id="vw-error" class="error" role="alert"></p><button class="text-button" id="vw-other">Choose another wallet</button>`);
+      container.querySelector("#vw-copy").onclick = () => navigator.clipboard.writeText(state.account).catch(notice);
+      container.querySelector("#vw-refresh").onclick = () => showAccount(account);
+      container.querySelector("#vw-lock")?.addEventListener("click", () => { local = null; activeAccount = null; setURL({ account: null }); walletHome(); });
+      container.querySelector("#vw-other").onclick = () => { activeAccount = null; setURL({ account: null }); walletHome(); };
+      container.querySelector("#vw-unlock-local")?.addEventListener("click", (event) => action(event.currentTarget, "Finding encrypted wallet…", async () => { const vault = (await listVaults()).find((item) => item.address.toLowerCase() === account.toLowerCase()); if (!vault) throw new Error("No local vault was found. Choose another wallet and restore your encrypted backup."); unlockScreen(vault); }));
+      container.querySelector("#vw-edit-guardians")?.addEventListener("click", () => enrollmentScreen(account, true));
+      container.querySelector("#vw-freeze")?.addEventListener("click", (event) => action(event.currentTarget, "Preparing action…", () => controllerReview(account, state.frozen ? "unfreeze" : "freeze")));
+      container.querySelector("#vw-cancel-recovery")?.addEventListener("click", (event) => action(event.currentTarget, "Preparing cancellation…", () => controllerReview(account, "cancel")));
+      container.querySelector("#vw-protect")?.addEventListener("click", () => enrollmentScreen(account));
+      container.querySelector("#vw-connect-controller")?.addEventListener("click", (event) => connect(event.currentTarget, () => showAccount(account)));
+      container.querySelector("#vw-max")?.addEventListener("click", () => { container.querySelector("#vw-amount").value = state.balanceETH; });
+      container.querySelector("#vw-transfer-form")?.addEventListener("submit", (event) => { event.preventDefault(); const to = container.querySelector("#vw-to").value.trim(); const amount = container.querySelector("#vw-amount").value.trim(); action(event.currentTarget.querySelector('button[type="submit"]'), "Preparing transfer…", () => transferReview(account, to, amount, !state.configured)); });
+    } catch (error) { if (version === sequence) frame("Account unavailable", `<p class="vc-note vc-warn">${escape(errorMessage(error))}</p><button class="text-button" id="vw-retry">Retry</button>`); container.querySelector("#vw-retry")?.addEventListener("click", () => showAccount(account)); }
+  }
+  function enrollmentScreen(account, updating = false) {
+    stop();
+    frame(updating ? "Manage guardians" : "Add recovery", `<div class="vc-section-intro"><h3>Choose people you trust</h3><p>Guardians can approve a replacement controller after a three-minute waiting period. They cannot move your funds through a recovery approval.</p></div><form id="vw-guardians" class="vc-gform">${[0, 1, 2].map((i) => `<label for="vw-g${i}">Guardian ${i + 1}${i ? " (optional)" : ""}</label><input id="vw-g${i}" placeholder="0x… address or Sepolia name.eth" autocomplete="off" spellcheck="false" />`).join("")}<p class="vc-fine">A majority must approve. Your account cannot be its own guardian. These addresses and approvals are public.</p><p id="vw-error" class="error" role="alert"></p><button class="button" type="submit">Review recovery setup</button></form>`);
+    container.querySelector("#vw-guardians").onsubmit = (event) => { event.preventDefault(); action(event.currentTarget.querySelector("button"), "Checking guardian addresses…", async () => {
+      const guardians = await resolveGuardians([0, 1, 2].map((i) => container.querySelector(`#vw-g${i}`).value.trim()).filter(Boolean));
+      const prepared = updating ? await api.prepareController({ account, guardians, action: "guardians" }) : await api.prepareEnrollment(account, guardians);
+      const message = updating ? { ...prepared.message, threshold: prepared.threshold, guardian0: prepared.actionInput.guardians[0], guardian1: prepared.actionInput.guardians[1] || "0x0000000000000000000000000000000000000000", guardian2: prepared.actionInput.guardians[2] || "0x0000000000000000000000000000000000000000" } : prepared.message;
+      frame("Review recovery setup", `${fullAddress(account)}<div class="vc-grid"><div class="vc-row"><span>Approvals required</span><strong>${message.threshold} of ${guardians.length}</strong></div><div class="vc-row"><span>Waiting period</span><strong>3 minutes</strong></div></div><div class="vc-guardian-list">${[message.guardian0, message.guardian1, message.guardian2].filter((g) => !/^0x0+$/.test(g)).map((g, i) => `<div><span>Guardian ${i + 1}</span>${addressChip(g)}</div>`).join("")}</div><p class="vc-fine">${updating ? "This updates this account’s ENS guardian roster and invalidates recovery approvals for the previous roster." : "This delegates your existing EOA to Voxy recovery and creates its ENS guardian roster."} Your address and funds stay the same. Guardian slots expire in one year.</p><p id="vw-error" class="error" role="alert"></p><button class="button" id="vw-enroll">${updating ? "Sign and save guardians" : "Sign and enable recovery"}</button>`);
+      container.querySelector("#vw-enroll").onclick = (click) => action(click.currentTarget, "Signing on this device…", async () => {
+        if (updating) {
+          const signer = accountSigner(account); if (!signer) throw new Error("Connect a controller before changing guardians.");
+          const signature = await sign(executionData(prepared, account, guardianCalls(prepared, account, guardians)), signer);
+          const operation = await api.controller({ actionInput: prepared.actionInput, message: prepared.message, signature });
+          return watchOperation(operation.id, account);
         }
-        loadGuardianRequests(await requestAccount(view.provider));
-      } catch (e2) {
-        err.textContent = e2.message;
-      }
+        if (!local || local.address.toLowerCase() !== account.toLowerCase()) throw new Error("Unlock this account locally before enrolling it.");
+        const signing = enrollmentData(prepared, account, guardians, approvedDeployment.implementation);
+        const reader = createPublicClient({ chain: sepolia, transport: http(network.rpcUrls[0]) });
+        const code = await reader.getCode({ address: account });
+        if (code && code !== "0x" && code.toLowerCase() !== `0xef0100${approvedDeployment.implementation.slice(2).toLowerCase()}`) throw new Error("The account delegates elsewhere; enrollment will not replace it.");
+        const signature = await local.signTypedData(signing);
+        const authorization = await local.signAuthorization(authorizationData(prepared, approvedDeployment.implementation));
+        const id = `enroll-${hashTypedData({ domain: eoaDomain(message.account), types: { Enrollment: eoaTypes.Enrollment }, primaryType: "Enrollment", message })}`;
+        setURL({ account, operation: native ? null : id, native: native ? id : null });
+        await api.enroll({ message, signature, authorization });
+        watchOperation(id, account);
+      });
+    }); };
+  }
+  async function controllerReview(account, actionName) {
+    const prepared = await api.prepareController({ account, action: actionName });
+    const labels = { freeze: "Pause recovery", unfreeze: "Resume recovery", cancel: "Cancel pending recovery" };
+    frame(labels[actionName], `<p class="vc-fine">This controller-signed action applies to:</p>${fullAddress(account)}<p class="vc-fine">${actionName === "cancel" || actionName === "freeze" ? "It invalidates pending recovery and collected approvals for the current owner epoch." : "Guardian recovery will be available again."}</p><p id="vw-error" class="error" role="alert"></p><button class="button" id="vw-control-sign">Sign and confirm</button>`);
+    container.querySelector("#vw-control-sign").onclick = (event) => action(event.currentTarget, "Waiting for signature…", async () => {
+      const signer = accountSigner(account); if (!signer) throw new Error("Connect a controller first.");
+      const call = actionName === "cancel" ? encodeFunctionData({ abi: recoveryAccountAbi, functionName: "cancelRecovery" }) : encodeFunctionData({ abi: recoveryAccountAbi, functionName: "setFrozen", args: [actionName === "freeze"] });
+      const signature = await sign(executionData(prepared, account, [{ to: account, value: 0n, data: call }]), signer);
+      const operation = await api.controller({ actionInput: prepared.actionInput, message: prepared.message, signature });
+      watchOperation(operation.id, account);
     });
   }
-
-  async function loadGuardianRequests(guardian) {
-    view.guardian = guardian;
-    const list = container.querySelector("#vc-g-list");
-    const err = container.querySelector("#vc-g-err");
-    list.innerHTML = `<div class="vc-note"><span class="status-dot"></span> Checking for requests that need you…</div>`;
-    let requests;
-    try {
-      ({ requests } = await api.pendingForGuardian(guardian));
-    } catch (e2) {
-      list.innerHTML = "";
-      err.textContent = e2.message;
-      return;
-    }
-    if (!requests.length) {
-      list.innerHTML = `<div class="vc-note">No recovery requests are waiting for <code>${short(guardian)}</code> right now. When someone you guard starts a recovery, it appears here.</div>`;
-      return;
-    }
-    list.innerHTML = requests
-      .map(
-        (r) => `
-      <div class="vc-req" data-id="${r.id}">
-        <div class="vc-seclabel"><span class="vc-secn">↻</span>Recovery request</div>
-        ${row("Account", chip(r.wallet))}
-        ${row("New owner", chip(r.newKey))}
-        <div class="vc-progress">Approved <b>${r.approved}</b> <span class="vc-dim">of ${r.threshold}</span></div>
-        <button class="button vc-g-approve" data-id="${r.id}" ${r.alreadySigned ? "disabled" : ""}>${r.alreadySigned ? "You already approved ✓" : "Approve this recovery"}</button>
-        <p class="error vc-g-row-err" role="alert"></p>
-      </div>`,
-      )
-      .join("");
-    list.querySelectorAll(".vc-g-approve").forEach((btn) =>
-      btn.addEventListener("click", async () => {
-        const id = btn.dataset.id;
-        const req = requests.find((r) => r.id === id);
-        const rowErr = btn.parentElement.querySelector(".vc-g-row-err");
-        btn.disabled = true;
-        btn.textContent = "Approving in your wallet…";
-        try {
-          await switchToDevnet();
-          const sig = await view.provider.request({
-            method: "eth_signTypedData_v4",
-            params: [view.guardian, JSON.stringify(req.typedData)],
-          });
-          const st = await api.approveRecovery(id, sig);
-          btn.textContent = st.submitted ? "✓ Quorum reached — submitted" : "✓ You approved";
-          loadGuardianRequests(view.guardian);
-        } catch (e2) {
-          btn.disabled = false;
-          btn.textContent = "Approve this recovery";
-          rowErr.textContent = e2.message;
-        }
-      }),
-    );
-  }
-
-  /* -------------------------------------------------------------- loader */
-  async function load() {
-    clearTimer();
-    container.innerHTML = `<span class="preview-label">VOXY / RECOVERY CONSOLE</span><div class="vc-loading"><span class="status-dot"></span> Reading live chain state…</div>`;
-    try {
-      const previous = S?.wallet;
-      S = await api.state(view.wallet);
-      G = S.guardianConfig;
-      if (previous?.toLowerCase() !== S.wallet.toLowerCase()) { view.draft = null; view.recovery = null; }
-      const url = new URL(location.href);
-      url.searchParams.set("voxy", view.wallet ?? S.wallet);
-      history.replaceState(null, "", url);
-    } catch (err) {
-      container.innerHTML = `<span class="preview-label">VOXY / RECOVERY CONSOLE</span><div class="vc-note vc-warn">Couldn't load that wallet: ${escape(err.message)}.</div><button class="text-button" id="vc-retry">← Choose another wallet</button>`;
-      container.querySelector("#vc-retry")?.addEventListener("click", () => {
-        view.loaded = false;
-        view.wallet = undefined;
-        renderEntry();
+  async function transferReview(account, to, amount, native = false) {
+    if (!isAddress(to, { strict: false }) || to.toLowerCase() === account.toLowerCase()) throw new Error("Enter another valid recipient address.");
+    if (native) {
+      if (!local || local.address.toLowerCase() !== account.toLowerCase()) throw new Error("Unlock this wallet to sign a native ETH transfer.");
+      const balance = (await api.account(account)).balanceETH;
+      const prepared = await prepareNativeTransfer(local, network, to, amount, amount === balance);
+      frame("Review transfer", `<h3>${escape(prepared.amount)} Sepolia ETH</h3><p class="vc-fine">To:</p>${fullAddress(to)}<p class="vc-fine">Network fee up to ${escape(prepared.maximumFee)} ETH, paid by this wallet.</p><p id="vw-error" class="error" role="alert"></p><button class="button" id="vw-native-send">Sign and send ETH</button>`);
+      container.querySelector("#vw-native-send").onclick = (event) => action(event.currentTarget, "Signing on this device…", async () => {
+        if (!local || local.address.toLowerCase() !== account.toLowerCase()) throw new Error("The wallet was locked. Unlock and review the transfer again.");
+        const hash = await sendNativeTransfer(local, network, prepared);
+        setURL({ account, native: hash, operation: null });
+        watchOperation(hash, account, true);
       });
       return;
     }
-    if (!view.draft) view.draft = G ? draftFrom(G) : [""];
-    if (S.isVoxyWallet === false) {
-      renderNotVoxy();
-      return;
-    }
-    render();
+    const prepared = await api.prepareTransfer({ account, to, amount });
+    const signer = accountSigner(account);
+    if (!signer) throw new Error("Unlock or connect a controller first.");
+    frame("Review transfer", `<div class="vc-section-intro"><h3>${escape(amount)} Sepolia ETH</h3><p>From ${addressChip(account)} to:</p>${fullAddress(to)}<p>The funds leave the original account only after you sign this transfer.</p></div><p id="vw-error" class="error" role="alert"></p><button class="button" id="vw-send">Sign and send ETH</button>`);
+    container.querySelector("#vw-send").onclick = (event) => action(event.currentTarget, "Waiting for your signature…", async () => {
+      const signature = await sign(executionData(prepared, account, [{ to: getAddress(to), value: parseEther(amount), data: "0x" }]), signer);
+      const message = prepared.message;
+      const id = `send-${message.account}-${message.nonce}-${message.callsHash}`;
+      setURL({ account, operation: native ? null : id, native: native ? id : null });
+      await api.transfer({ account, to, amount, message, signature });
+      watchOperation(id, account);
+    });
   }
-
-  /* ----------------------------------------- not a Voxy wallet (an EOA) */
-  function renderNotVoxy() {
-    clearTimer();
-    const s = S;
-    container.innerHTML = `
-      <div class="vc-head">
-        <span class="preview-label">Voxy recovery</span>
-        <h2 class="vc-title">${mode === "recover" ? "Recover a wallet" : "Protect a wallet"}</h2>
-        <form id="vc-switch" class="vc-walletbar">
-          <label for="vc-wallet">${mode === "recover" ? "Wallet to recover" : "Wallet to protect"}</label>
-          <div class="vc-walletbar-row">
-            <input id="vc-wallet" value="${escape(view.wallet ?? "")}" placeholder="0x… address or name.eth" autocomplete="off" spellcheck="false" />
-            <button class="button button-small" type="submit">Load</button>
-          </div>
-          <p id="vc-wallet-err" class="error" role="alert"></p>
-        </form>
-      </div>
-      <div class="vc-panel">
-        <section class="vc-setup">
-          <span class="vc-connected">${view.walletName ? `Connected with ${escape(view.walletName)}` : "Account checked on-chain"}</span>
-          <h3>Add a recovery account</h3>
-          <p>No Voxy account was found for ${chip(s.wallet)}. Create one owned by this address, then choose the people who can help you recover it.</p>
-          <div class="vc-setup-details"><span>Gas sponsored</span><span>Your choice of guardians</span><span>Saved on-chain</span></div>
-          <p class="vc-fine">This creates a separate smart account. Recovery protects that account; assets in your existing wallet stay in your existing wallet.</p>
-        </section>
-        <div class="vc-enter-actions">
-          <button class="button" id="vc-create">Create recovery account</button>
-          <button class="text-button" id="vc-connect">Connect a different wallet</button>
-        </div>
-        <div id="vc-wallets2" class="vc-wallets"></div>
-        <div id="vc-createresult"></div>
-      </div>
-      <div class="vc-foot">
-        <span class="vc-dim">Live reads · Sepolia + alt-mempool devnet</span>
-      </div>`;
-    container.querySelector("#vc-switch")?.addEventListener("submit", (e) => {
-      e.preventDefault();
-      const v = container.querySelector("#vc-wallet").value.trim();
-      const err = container.querySelector("#vc-wallet-err");
-      if (v && !isGuardianInput(v)) {
-        if (err) err.textContent = "Enter a 0x… address or a name.eth.";
-        return;
-      }
-      view.wallet = v && v.toLowerCase() !== s.demoWallet.toLowerCase() ? v : undefined;
-      load();
-    });
-    container.querySelector("#vc-connect")?.addEventListener("click", (e) =>
-      doConnect(
-        e.currentTarget,
-        container.querySelector("#vc-wallet-err"),
-        container.querySelector("#vc-wallets2"),
-        (addr) => {
-          view.wallet = addr;
-          load();
-        },
-      ),
-    );
-    container.querySelector("#vc-usedemo")?.addEventListener("click", () => {
-      view.wallet = undefined;
-      load();
-    });
-    container.querySelector("#vc-create")?.addEventListener("click", async (e) => {
-      const btn = e.currentTarget;
-      btn.disabled = true;
-      btn.textContent = "Creating account…";
-      const result = container.querySelector("#vc-createresult");
-      result.innerHTML = `<div class="vc-note"><span class="status-dot"></span> Creating your account on-chain. Keep this window open; if it closes, reconnect to find your account.</div>`;
+  function watchOperation(id, account, native = false) {
+    stop(); const version = sequence;
+    setURL({ account, operation: native ? null : id, native: native ? id : null });
+    frame("Transaction status", '<div class="vc-loading" role="status">Checking the saved transaction…</div><p id="vw-error" class="error" role="alert"></p>');
+    const check = async () => {
       try {
-        const res = await api.createWallet(s.wallet);
-        view.wallet = res.wallet;
-        view.draft = null;
-        view.tab = "guardians";
-        load();
-      } catch (err) {
-        btn.disabled = false;
-        btn.textContent = "Create recovery account";
-        result.innerHTML = `<div class="vc-note vc-warn">${escape(err.message)}</div>`;
-      }
-    });
-  }
-
-  /* -------------------------------------------------------------- panels */
-  function panelOverview() {
-    const s = S;
-    const g = s.roster.guardians.filter((a) => a && !isZero(a));
-    const ready = g.length >= s.roster.threshold && s.roster.threshold > 0 && s.roster.crossChainMatch && !G?.sharedLegacy;
-    return `
-      <section class="vc-summary">
-        <div><span class="vc-state ${s.frozen ? "vc-bad" : ready ? "vc-ok" : ""}">${s.frozen ? "Recovery frozen" : ready ? "Recovery enabled" : G?.sharedLegacy ? "Replace demo guardians" : "Choose your guardians"}</span>
-        <h3>${ready ? `${s.roster.threshold} approvals protect this account` : "One more step to protect your account"}</h3>
-        <p>${ready ? `A new owner can be added after a ${s.recoveryDelaySeconds}-second waiting period.` : "Add trusted people in Guardians. Your account is already saved on-chain."}</p></div>
-        <div class="vc-quorum"><strong>${g.length}</strong><span>guardians</span></div>
-      </section>
-      <div class="vc-grid">
-        ${row("Recovery account", `${chip(s.wallet)}${ext(`${s.explorer.devnet}/address/${s.wallet}`)}`)}
-        ${row("Owner addresses", s.owners.map(ownerChip).join(" "))}
-        ${row("Recovery delay", `${s.recoveryDelaySeconds} seconds`)}
-      </div>
-      <section class="vc-roster-summary"><h3>${G?.sharedLegacy ? "Current demo guardian roster" : "Guardian roster"}</h3>
-        ${g.length ? `<div class="vc-guardian-list">${g.map((a, i) => `<div><span>Guardian ${i + 1}</span>${chip(a)}</div>`).join("")}</div>` : `<p class="vc-fine">No guardians configured. Add your own addresses or Sepolia ENS names.</p>`}
-        <details class="vc-chain-details"><summary>On-chain verification <span class="${s.roster.crossChainMatch ? "vc-ok" : ""}">${s.roster.crossChainMatch ? "In sync" : s.roster.configured ? "Sync needed" : "Awaiting setup"}</span></summary>
-          ${row("Sepolia roster hash", chip(s.roster.sepoliaRosterHash))}
-          ${row("Devnet roster hash", chip(s.roster.rosterHash))}
-          ${row("Roster version", s.roster.epoch)}
-        </details>
-      </section>`;
-  }
-
-  function panelGuardians() {
-    const draft = view.draft;
-    const nonEmpty = draft.filter((v) => v.trim() !== "").length;
-    const rows = draft
-      .map(
-        (val, i) => `
-      <div class="vc-slot">
-        <label class="vc-slot-tag" for="vc-guardian-${i}">Guardian ${i + 1}</label>
-        <input id="vc-guardian-${i}" class="vc-slot-input" data-gi="${i}" value="${escape(val)}" placeholder="0x… address or name.eth" autocomplete="off" spellcheck="false" />
-        <button type="button" class="vc-slot-x" data-rm="${i}" aria-label="Remove guardian ${i + 1}" ${draft.length <= 1 ? "disabled" : ""}>×</button>
-      </div>`,
-      )
-      .join("");
-    return `
-      <div class="vc-section-intro"><h3>People you trust</h3><p>Choose up to three guardians. They only need a wallet they control; a Voxy account is not required.</p></div>
-      ${G?.sharedLegacy ? '<p class="vc-note vc-warn">This account still uses the shared demo roster. Save your own guardians to give this account a separate roster.</p>' : ''}
-      <button class="text-button" id="vc-signconnect" type="button">${view.owner ? `Signing wallet: ${short(view.owner)} · Change` : "Connect the owner wallet to save changes"}</button><div id="vc-signwallets"></div>
-      <form id="vc-gform" class="vc-gform" novalidate>
-        ${rows}
-        <button type="button" class="vc-addg" id="vc-addg" ${draft.length >= 3 ? "disabled" : ""}>+ Add guardian${draft.length >= 3 ? " · max 3" : ""}</button>
-        <div class="vc-majority"><span>Approvals needed</span><b id="vc-maj">${nonEmpty ? `${majorityOf(nonEmpty)} of ${nonEmpty}` : "Not set"}</b><span class="vc-dim">majority of your guardians</span></div>
-        <p id="vc-gerr" class="error" role="alert"></p>
-        <button class="button" type="submit">Save guardians</button>
-        <p class="vc-fine">Use a wallet address or a name registered on Sepolia. The owner signs the change; Voxy sponsors the on-chain update.</p>
-      </form>
-      <div id="vc-gresult"></div>`;
-  }
-
-  function panelRecover() {
-    const s = S;
-    if (s.frozen) {
-      return `<div class="vc-note vc-warn">This wallet is frozen by its owner. Recovery is paused until it is unfrozen.</div>`;
-    }
-    if (s.pending) {
-      const p = s.pending;
-      return `
-        <div class="vc-pending">
-          <div class="vc-pending-head"><span class="status-dot"></span> Recovery in progress</div>
-          ${row("New owner (pending)", ownerChip(p.newKey))}
-          ${row("Request ID", chip(p.requestId))}
-          <div class="vc-row"><span class="vc-label">Time-lock</span><span class="vc-value" id="vc-countdown">${p.ready ? "Ready" : `${p.secondsRemaining}s remaining`}</span></div>
-          <button class="button" id="vc-execute" ${p.ready ? "" : "disabled"}>Finalize recovery (add-only)</button>
-          <button class="text-button vc-cancel" id="vc-cancel">Cancel this recovery</button>
-          <button class="text-button" id="vc-signconnect">Connect the owner wallet</button><div id="vc-signwallets"></div>
-          <p class="vc-fine">Add-only: finalizing installs the new owner alongside the existing one. It can never remove owners or move funds. The owner can cancel any time before finalizing.</p>
-        </div>`;
-    }
-    if (s.roster.threshold < 1) {
-      return `<div class="vc-section-intro"><h3>Set up guardians first</h3><p>This account is saved on-chain. Choose your guardians before you can start a recovery.</p><button class="button" id="vc-setup-guardians">Choose guardians</button></div>`;
-    }
-    if (view.recovery?.id) return recoveryStatusCard();
-    const g = s.roster.guardians.filter((a) => a && !isZero(a));
-    return `
-      <form id="vc-start" class="vc-start" novalidate>
-        <h3>Recover this account</h3>
-        <p class="vc-fine">Add a new owner address. Your <b>${s.roster.threshold}-of-${g.length}</b> guardians approve it, then a ${s.recoveryDelaySeconds}s time-lock runs before it is installed (add-only — it never removes owners or moves funds).</p>
-        <label for="vc-newkey">New owner address</label>
-        <input id="vc-newkey" placeholder="0x… address of your new wallet" autocomplete="off" spellcheck="false" />
-        <p id="vc-newkey-err" class="error" role="alert"></p>
-        <button class="button" type="submit">Create recovery request</button>
-      </form>`;
-  }
-
-  // The live coordination card — the shared place everyone watches, so nobody copy-pastes JSON.
-  function recoveryStatusCard() {
-    const r = view.recovery;
-    const st = r.status || {};
-    const approved = st.approved ?? 0;
-    const threshold = st.threshold ?? r.threshold ?? 2;
-    const submitted = st.submitted;
-    const signers = (st.signers || []).filter(Boolean);
-    return `
-      <div class="vc-status">
-        <div class="vc-pending-head"><span class="status-dot"></span> ${submitted ? "Quorum reached — recovery submitted on-chain" : "Waiting for guardian approvals"}</div>
-        ${row("New owner", chip(r.newKey))}
-        <div class="vc-progress">Guardians approved <b id="vc-approved">${approved}</b> <span class="vc-dim">of ${threshold}</span></div>
-        ${signers.length ? `<div class="vc-signers">${signers.map((a) => `${chip(a)} <span class="vc-ok">✓</span>`).join(" ")}</div>` : ""}
-        ${
-          submitted
-            ? `${st.txHash ? row("Tx", `<a href="${S.explorer.devnet}/tx/${st.txHash}" target="_blank" rel="noopener">${short(st.txHash)} ↗</a>`) : ""}
-               <button class="button" id="vc-continue">View time-lock →</button>`
-            : `<button class="button" id="vc-guardian-sign">Approve as a guardian (this wallet)</button>
-               <div id="vc-signwallets"></div>
-               <p class="vc-fine">Each guardian opens Voxy, goes to <b>"I'm a guardian — approve a request"</b>, connects their wallet and approves. The count rises here live, and recovery submits itself once <b>${threshold}</b> guardians have approved.</p>`
-        }
-        <p id="vc-status-err" class="error" role="alert"></p>
-        <button class="text-button" id="vc-recovery-cancel">← Start a different request</button>
-      </div>`;
-  }
-
-  function panelSurfaces() {
-    const surfaces = (S.surfaces || []).filter((x) => x.address);
-    if (!surfaces.length) return `<p class="vc-fine">No enforcement surfaces reported.</p>`;
-    return `<div class="vc-surfaces">${surfaces
-      .map(
-        (x) => `
-        <div class="vc-surface">
-          <div class="vc-surface-top"><span class="vc-surface-name">${x.label}</span><span class="vc-dim">${x.chain}</span></div>
-          <div class="vc-surface-addr">${chip(x.address)}${ext(x.explorer)}</div>
-          <p class="vc-fine">${x.note}</p>
-        </div>`,
-      )
-      .join("")}</div>
-      <p class="vc-fine">These are the enforcement surfaces deployed for the selected account on testnets.</p>`;
-  }
-
-  /* --------------------------------------------------------- full render */
-  function render() {
-    clearPoll();
-    const s = S;
-    const panel =
-      view.tab === "guardians"
-        ? panelGuardians()
-        : view.tab === "recover"
-          ? panelRecover()
-          : view.tab === "surfaces"
-            ? panelSurfaces()
-            : panelOverview();
-
-    container.innerHTML = `
-      <div class="vc-head">
-        <span class="preview-label">Voxy recovery</span>
-        <h2 class="vc-title">${mode === "recover" ? "Recover an account" : "Protect a wallet"}</h2>
-        <form id="vc-switch" class="vc-walletbar">
-          <label for="vc-wallet">${mode === "recover" ? "Wallet to recover" : "Wallet to protect"}</label>
-          <div class="vc-walletbar-row">
-            <input id="vc-wallet" value="${escape(view.wallet ?? s.wallet)}" autocomplete="off" spellcheck="false" />
-            <button class="button button-small" type="submit">Load</button>
-          </div>
-          <p id="vc-wallet-err" class="error" role="alert"></p>
-          <p class="vc-fine vc-walletnote">Owned by <code>${short(s.owners?.[0] || s.wallet)}</code>. Account and guardian settings are read from chain.</p>
-        </form>
-        ${(s.accounts?.length ?? 0) > 1 ? `<label class="vc-account-select">${mode === "recover" ? "Which account are you recovering?" : "Voxy accounts this wallet owns"}<select id="vc-account">${s.accounts.map((a) => `<option value="${a}" ${a.toLowerCase() === s.wallet.toLowerCase() ? "selected" : ""}>${a}</option>`).join("")}</select><span class="vc-fine vc-account-hint">${mode === "recover" ? "This wallet owns more than one Voxy account — pick the one you lost access to." : "This wallet owns more than one Voxy account. Pick the one to manage."}</span></label>` : ""}
-        <nav class="vc-tabs" role="tablist">
-          ${TABS.map(([id, label]) => `<button class="vc-tab ${view.tab === id ? "active" : ""}" data-tab="${id}" role="tab" aria-selected="${view.tab === id}">${label}</button>`).join("")}
-        </nav>
-      </div>
-      <div class="vc-panel">${panel}</div>
-      <div class="vc-foot">
-        <button class="text-button" id="vc-refresh">↻ Refresh live state</button>
-        <span class="vc-dim">Live reads · Sepolia + alt-mempool devnet</span>
-      </div>`;
-
-    container.querySelectorAll(".vc-tab").forEach((b) =>
-      b.addEventListener("click", () => {
-        view.tab = b.dataset.tab;
-        render();
-      }),
-    );
-    container.querySelector("#vc-refresh")?.addEventListener("click", load);
-    container.querySelector("#vc-switch")?.addEventListener("submit", (e) => {
-      e.preventDefault();
-      const v = container.querySelector("#vc-wallet").value.trim();
-      const err = container.querySelector("#vc-wallet-err");
-      if (v && !isGuardianInput(v)) {
-        if (err) err.textContent = "Enter a 0x… address or a name.eth.";
-        return;
-      }
-      view.wallet = v && v.toLowerCase() !== s.demoWallet.toLowerCase() ? v : undefined;
-      load();
-    });
-
-    container.querySelector("#vc-account")?.addEventListener("change", (e) => { view.wallet = e.target.value; view.draft = null; load(); });
-    wireActions();
-    startCountdown();
-    if (view.tab === "recover" && view.recovery?.id && !view.recovery.status?.submitted) startPoll();
-  }
-
-  /* ----------------------------------------------------------- actions */
-  function wireActions() {
-    const rememberRecoveryDraft = () => {
-      view.recovery = { ...view.recovery, requestText: container.querySelector("#vc-request").value, signaturesText: container.querySelector("#vc-signatures").value };
+        const operation = native ? await api.nativeStatus(id) : await api.operation(id);
+        if (!alive || version !== sequence) return;
+        if (operation.phase === "confirmed") { setURL({ operation: null, native: null }); return showAccount(account); }
+        frame(operation.phase === "reverted" ? "Transaction reverted" : "Waiting for confirmation", `<p class="vc-fine">${operation.phase === "reverted" ? escape(operation.error) : "The submitted transaction is saved. You can refresh this page and resume checking its original hash."}</p><div class="vc-txlist">${txLink(operation)}</div><p id="vw-error" class="error" role="alert"></p><button class="text-button" id="vw-check-account">Check account state</button>`);
+        container.querySelector("#vw-check-account").onclick = () => showAccount(account);
+        if (operation.phase !== "reverted") poll = setTimeout(check, 3000);
+      } catch (error) { if (version === sequence) { notice(error); poll = setTimeout(check, 5000); } }
     };
-    container.querySelectorAll("#vc-request, #vc-signatures").forEach((input) => input.addEventListener("input", rememberRecoveryDraft));
-    container.querySelector("#vc-setup-guardians")?.addEventListener("click", () => { view.tab = "guardians"; render(); });
-    container.querySelector("#vc-signconnect")?.addEventListener("click", (e) => doConnect(e.currentTarget, container.querySelector("#vc-gerr, #vc-approval-error, .vc-pending .error"), container.querySelector("#vc-signwallets"), () => { e.target.textContent = `Signing wallet: ${short(view.owner)}`; }));
-
-    // guardians: live majority, add/remove rows, save
-    container.querySelectorAll(".vc-slot-input[data-gi]").forEach((i) =>
-      i.addEventListener("input", () => {
-        view.draft[Number(i.dataset.gi)] = i.value;
-        const n = view.draft.filter((v) => v.trim() !== "").length;
-        const el = container.querySelector("#vc-maj");
-        if (el) el.textContent = n ? `${majorityOf(n)} of ${n}` : "Not set";
-      }),
-    );
-    container.querySelectorAll(".vc-slot-x[data-rm]").forEach((b) =>
-      b.addEventListener("click", () => {
-        // keep inputs' current text before re-render
-        container
-          .querySelectorAll(".vc-slot-input[data-gi]")
-          .forEach((i) => (view.draft[Number(i.dataset.gi)] = i.value));
-        view.draft.splice(Number(b.dataset.rm), 1);
-        if (!view.draft.length) view.draft = [""];
-        render();
-      }),
-    );
-    container.querySelector("#vc-addg")?.addEventListener("click", () => {
-      container
-        .querySelectorAll(".vc-slot-input[data-gi]")
-        .forEach((i) => (view.draft[Number(i.dataset.gi)] = i.value));
-      if (view.draft.length < 3) view.draft.push("");
-      render();
-    });
-
-    const gform = container.querySelector("#vc-gform");
-    gform?.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const inputs = [...container.querySelectorAll(".vc-slot-input[data-gi]")];
-      const entries = inputs.map((i) => i.value.trim());
-      const err = container.querySelector("#vc-gerr");
-      if (!entries.every(isGuardianInput)) {
-        err.textContent = "Each guardian must be a 0x… address or a name.eth.";
-        return;
-      }
-      const filled = entries.filter((v) => v !== "");
-      if (!filled.length) {
-        err.textContent = "Add at least one guardian.";
-        return;
-      }
-      const guardians = [entries[0] || "", entries[1] || "", entries[2] || ""];
-      const threshold = majorityOf(filled.length);
-      const btn = gform.querySelector("button[type=submit]");
-      btn.disabled = true;
-      btn.textContent = "Writing roster on-chain… (~30–60s)";
-      err.textContent = "";
-      const result = container.querySelector("#vc-gresult");
-      result.innerHTML = `<div class="vc-note"><span class="status-dot"></span> Registering guardians on Sepolia, then syncing to devnet…</div>`;
-      try {
-        if (view.provider) view.owner = await requestAccount(view.provider);
-        if (!view.provider || !view.owner || !S.owners.some((a) => a.toLowerCase() === view.owner.toLowerCase())) throw new Error("Connect an owner of this account before saving guardians.");
-        const { message } = await api.guardianIntent(guardians, threshold, S.wallet);
-        const hex = `0x${Array.from(new TextEncoder().encode(message), (b) => b.toString(16).padStart(2, "0")).join("")}`;
-        const signature = await view.provider.request({ method: "personal_sign", params: [hex, view.owner] });
-        const res = await api.setGuardians(guardians, threshold, S.wallet, { message, signature });
-        if (res.changed === false) {
-          result.innerHTML = `<div class="vc-note vc-warn">${res.message}</div>`;
-        } else {
-          const txs = [
-            ...(res.sepoliaTxs || []).map(
-              (t) => `<a href="${t.explorer}" target="_blank" rel="noopener">${t.op} ${t.slot} ${short(t.hash)} ↗</a>`,
-            ),
-            res.thresholdTx
-              ? `<a href="${res.thresholdTx.explorer}" target="_blank" rel="noopener">threshold ${short(res.thresholdTx.hash)} ↗</a>`
-              : "",
-            res.syncTx
-              ? `<a href="${res.syncTx.explorer}" target="_blank" rel="noopener">devnet sync (epoch ${res.syncTx.epoch}) ${short(res.syncTx.hash)} ↗</a>`
-              : "",
-          ].filter(Boolean);
-          result.innerHTML = `<div class="vc-note vc-ok-note"><b>✓ Roster updated &amp; synced.</b><div class="vc-txlist">${txs.join("")}</div></div>`;
-        }
-        view.draft = null;
-        setTimeout(load, 1200);
-      } catch (e2) {
-        btn.disabled = false;
-        btn.textContent = "Save guardians";
-        result.innerHTML = "";
-        err.textContent = e2.message;
-      }
-    });
-
-    // start recovery
-    const form = container.querySelector("#vc-start");
-    form?.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const input = container.querySelector("#vc-newkey");
-      const err = container.querySelector("#vc-newkey-err");
-      if (!isAddress(input.value)) {
-        err.textContent = "Enter a valid 0x… address (40 hex chars).";
-        return;
-      }
-      const btn = form.querySelector("button");
-      btn.disabled = true;
-      btn.textContent = "Creating request…";
-      try {
-        const r = await api.requestRecovery(S.wallet, input.value.trim());
-        view.recovery = {
-          id: r.id,
-          newKey: r.newKey,
-          threshold: r.threshold,
-          typedData: r.typedData,
-          guardians: r.guardians,
-          status: r,
-        };
-        render();
-      } catch (e2) {
-        btn.disabled = false;
-        btn.textContent = "Create recovery request";
-        err.textContent = e2.message;
-      }
-    });
-
-    // --- coordination status card handlers ---
-    container.querySelector("#vc-continue")?.addEventListener("click", () => {
-      view.recovery = null;
-      load();
-    });
-    container.querySelector("#vc-recovery-cancel")?.addEventListener("click", () => {
-      clearPoll();
-      view.recovery = null;
-      render();
-    });
-    container.querySelector("#vc-guardian-sign")?.addEventListener("click", async (e) => {
-      const serr = container.querySelector("#vc-status-err");
-      e.currentTarget.disabled = true;
-      try {
-        if (!view.provider) {
-          const wallets = await discoverWallets();
-          if (!wallets.length) throw new Error("No wallet found. Install MetaMask/Rainbow to approve.");
-          view.provider = wallets[0].provider;
-        }
-        const owner = await requestAccount(view.provider);
-        if (!S.roster.guardians.some((a) => a.toLowerCase() === owner.toLowerCase())) {
-          throw new Error("This wallet is not a guardian of this account.");
-        }
-        await switchToDevnet();
-        const sig = await view.provider.request({
-          method: "eth_signTypedData_v4",
-          params: [owner, JSON.stringify(view.recovery.typedData)],
-        });
-        view.recovery.status = await api.approveRecovery(view.recovery.id, sig);
-        render();
-      } catch (e2) {
-        if (serr) serr.textContent = e2.message;
-        e.currentTarget.disabled = false;
-      }
-    });
-
-    container.querySelector("#vc-approve")?.addEventListener("click", async (e) => {
-      const err = container.querySelector("#vc-approval-error");
-      e.target.disabled = true;
-      try {
-        if (!view.provider) throw new Error("Connect a guardian wallet first.");
-        view.owner = await requestAccount(view.provider);
-        if (!S.roster.guardians.some((a) => a.toLowerCase() === view.owner.toLowerCase())) throw new Error("This signing wallet is not a guardian of this account.");
-        const message = JSON.parse(container.querySelector("#vc-request").value);
-        if (message.wallet.toLowerCase() !== S.wallet.toLowerCase()) throw new Error("This request is for a different account.");
-        const prepared = await api.prepareRecovery(message.newKey, S.wallet);
-        const typedData = { ...prepared.typedData, message };
-        await switchToDevnet();
-        const signature = await view.provider.request({ method: "eth_signTypedData_v4", params: [view.owner, JSON.stringify(typedData)] });
-        const signatures = container.querySelector("#vc-signatures");
-        signatures.value = [signatures.value.trim(), signature].filter(Boolean).join("\n");
-        rememberRecoveryDraft();
-        err.textContent = "Approval signed. Copy your signature to share it with the person collecting approvals.";
-      } catch (e2) { err.textContent = e2.message; }
-      finally { e.target.disabled = false; }
-    });
-    container.querySelector("#vc-submit-approvals")?.addEventListener("click", async (e) => {
-      const err = container.querySelector("#vc-approval-error");
-      e.target.disabled = true;
-      try {
-        const request = container.querySelector("#vc-request").value;
-        const message = JSON.parse(request);
-        const signatures = container.querySelector("#vc-signatures").value.split(/\s+/).filter(Boolean);
-        await api.startRecovery(message.newKey, S.wallet, request, signatures);
-        view.recovery = null;
-        await load();
-      } catch (e2) { err.textContent = e2.message; e.target.disabled = false; }
-    });
-
-    // finalize recovery
-    const exec = container.querySelector("#vc-execute");
-    exec?.addEventListener("click", async () => {
-      exec.disabled = true;
-      exec.textContent = "Finalizing…";
-      try {
-        const res = await api.executeRecovery(S.wallet);
-        container.querySelector(".vc-panel").innerHTML =
-          `<div class="vc-note vc-ok-note"><b>✓ New owner installed.</b>${row("Owners now", res.owners.map(ownerChip).join(" "))}${row("Tx", `<a href="${S.explorer.devnet}/tx/${res.tx.hash}" target="_blank" rel="noopener">${short(res.tx.hash)} ↗</a>`)}</div><button class="button" id="vc-done">Done</button>`;
-        container.querySelector("#vc-done")?.addEventListener("click", load);
-      } catch (e3) {
-        exec.disabled = false;
-        exec.textContent = "Finalize recovery (add-only)";
-        const n = container.querySelector(".vc-pending");
-        if (n) n.insertAdjacentHTML("beforeend", `<p class="error">${escape(e3.message)}</p>`);
-      }
-    });
-
-    // cancel recovery
-    const cancel = container.querySelector("#vc-cancel");
-    cancel?.addEventListener("click", async () => {
-      cancel.disabled = true;
-      cancel.textContent = "Cancelling…";
-      try {
-        if (S.wallet.toLowerCase() === S.demoWallet.toLowerCase()) {
-          await api.cancelRecovery(S.wallet);
-        } else {
-          if (!view.provider) throw new Error("Connect the owner wallet first.");
-          const [owner] = await view.provider.request({ method: "eth_requestAccounts" });
-          if (!S.owners.some((a) => a.toLowerCase() === owner?.toLowerCase())) throw new Error("Only an account owner can cancel recovery.");
-          await switchToDevnet();
-          const hash = await view.provider.request({ method: "eth_sendTransaction", params: [{ from: owner, ...S.ownerActions.cancel }] });
-          cancel.textContent = "Waiting for confirmation…";
-          let receipt;
-          for (let i = 0; i < 60; i++) {
-            receipt = await view.provider.request({ method: "eth_getTransactionReceipt", params: [hash] });
-            if (receipt) break;
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-          }
-          if (!receipt) throw new Error(`Transaction ${hash} is pending. Refresh live state to check it.`);
-          if (receipt.status !== "0x1") throw new Error("The cancellation transaction reverted.");
-        }
-        load();
-      } catch (e4) {
-        cancel.disabled = false;
-        cancel.textContent = "Cancel this recovery";
-        const n = container.querySelector(".vc-pending");
-        if (n) n.insertAdjacentHTML("beforeend", `<p class="error">${escape(e4.message)}</p>`);
-      }
-    });
+    check();
   }
-
-  function startCountdown() {
-    if (view.tab === "recover" && S.pending && !S.pending.ready) {
-      let remaining = S.pending.secondsRemaining;
-      const el = container.querySelector("#vc-countdown");
-      timer = setInterval(() => {
-        remaining -= 1;
-        if (remaining <= 0) {
-          // Elapsed: flip to "Ready" in place — never re-trigger the loading flash.
-          clearTimer();
-          if (el) el.textContent = "Ready";
-          const exec = container.querySelector("#vc-execute");
-          if (exec) exec.disabled = false;
-          if (S.pending) S.pending.ready = true;
-        } else if (el) {
-          el.textContent = `${remaining}s remaining`;
-        }
-      }, 1000);
-    }
+  function recoveryEntry() {
+    stop();
+    frame("Recover access", `<div class="vc-section-intro"><h3>Return to the same address</h3><p>Enter the protected EOA’s address. You do not need its original key. Connect a replacement controller you own, then ask your guardians to approve it.</p></div><form id="vw-recover-form" class="vc-gform"><label for="vw-lost">Protected account address</label><input id="vw-lost" placeholder="0x…" value="${escape(activeAccount || "")}" autocomplete="off" spellcheck="false" /><p class="vc-fine">${connectionLabel()}${local ? ` · Local wallet: ${addressChip(local.address)}` : ""}</p><button type="button" class="text-button" id="vw-connect">Connect replacement wallet</button><div id="vw-picker"></div><p class="vc-fine">If no browser wallet is connected, your unlocked local wallet will be the replacement controller.</p><p id="vw-error" class="error" role="alert"></p><button class="button" type="submit">Review recovery request</button></form>`, "recover");
+    container.querySelector("#vw-connect").onclick = (event) => { activeAccount = container.querySelector("#vw-lost").value.trim(); connect(event.currentTarget, recoveryEntry); };
+    container.querySelector("#vw-recover-form").onsubmit = (event) => { event.preventDefault(); const account = container.querySelector("#vw-lost").value.trim(); action(event.currentTarget.querySelector('button[type="submit"]'), "Checking recovery state…", async () => {
+      const controller = signerAddress(); if (!controller) throw new Error("Connect a replacement wallet, or unlock a different local wallet.");
+      const prepared = await api.prepareRecovery(account, controller);
+      frame("Review recovery request", `<p class="vc-fine">Recover this account:</p>${fullAddress(account)}<p class="vc-fine">Add this replacement controller:</p>${fullAddress(controller)}<p class="vc-fine">${prepared.threshold} guardians must approve. Then the account enforces a three-minute waiting period. This request and guardian approvals are published on Arkiv Rabdi.</p><p id="vw-error" class="error" role="alert"></p><button class="button" id="vw-publish">Sign and share with guardians</button>`, "recover");
+      container.querySelector("#vw-publish").onclick = (click) => action(click.currentTarget, "Publishing your signed request…", async () => {
+        const request = recoveryData(prepared.message, account, controller);
+        const proof = await sign(request, controller);
+        const digest = eoaRecoveryHash(request.message);
+        setURL({ recovery: prepared.message.requestId, digest, "voxy-mode": "recover", operation: null });
+        await api.requestRecovery(prepared.message, proof);
+        watchRecovery(prepared.message.requestId, digest);
+      });
+    }); };
   }
-
-  const remembered = new URL(location.href).searchParams.get("voxy");
-  if (remembered && isGuardianInput(remembered)) {
-    view.wallet = remembered;
-    load();
-  } else {
-    renderEntry();
+  function guardianEntry() {
+    stop();
+    frame("Guardian approvals", `<div class="vc-section-intro"><h3>Approve someone’s way back</h3><p>Connect the address they chose as a guardian. Review the protected account and replacement controller before signing.</p></div><p class="vc-fine">${connectionLabel()}</p><button class="button" id="vw-guardian-connect">Connect guardian wallet</button><div id="vw-picker"></div>${local ? '<button class="text-button" id="vw-local-guardian">Use unlocked local wallet</button>' : ""}<form id="vw-request-link" class="vc-gform"><label for="vw-request-id">Or open a shared request ID or link</label><input id="vw-request-id" autocomplete="off" spellcheck="false" /><button class="text-button" type="submit">Open request</button></form><div id="vw-requests"></div><p id="vw-error" class="error" role="alert"></p>`, "guardian");
+    const load = async (guardian) => { const result = await api.requests("guardian", guardian); const node = container.querySelector("#vw-requests"); if (!node) return; node.innerHTML = result.requests.length ? result.requests.map((r, i) => `<button class="vw-vault" data-request="${i}"><span>${addressChip(r.account)} → ${addressChip(r.newController)}</span><span>${r.approved}/${r.threshold} approvals</span></button>`).join("") : '<p class="vc-note">No active requests were found for this guardian.</p>'; if (!result.complete) node.innerHTML += '<p class="vc-note vc-warn">This list is incomplete. Open the direct request link to find a specific recovery.</p>'; node.querySelectorAll("[data-request]").forEach((button) => button.onclick = () => watchRecovery(result.requests[Number(button.dataset.request)].id, eoaRecoveryHash(parseEOARecovery(result.requests[Number(button.dataset.request)].typedData.message)))); };
+    container.querySelector("#vw-guardian-connect").onclick = (event) => connect(event.currentTarget, () => load(connection.address));
+    container.querySelector("#vw-local-guardian")?.addEventListener("click", (event) => action(event.currentTarget, "Finding requests…", () => load(local.address)));
+    container.querySelector("#vw-request-link").onsubmit = (event) => { event.preventDefault(); try { let value = container.querySelector("#vw-request-id").value.trim(); let digest; if (value.startsWith("http")) { const link = new URL(value); value = link.searchParams.get("recovery"); digest = link.searchParams.get("digest"); } if (!/^0x[0-9a-f]{64}$/i.test(value || "")) throw new Error("Enter a valid request ID or Voxy request link."); watchRecovery(value, digest); } catch (error) { notice(error); } };
   }
-  return () => {
-    clearTimer();
-    clearPoll();
-    dialog?.classList.remove("vc-dialog");
-  };
+  function watchRecovery(id, expectedDigest) {
+    stop(); const version = sequence;
+    setURL({ recovery: id, digest: expectedDigest || null, operation: null, "voxy-mode": "recover" });
+    frame("Recovery progress", '<div class="vc-loading">Reading the request and account state…</div><p id="vw-error" class="error"></p>', "recover");
+    let signing = false;
+    const check = async () => {
+      try {
+        const state = await api.recovery(id);
+        const parsed = parseEOARecovery(state.typedData.message);
+        const digest = eoaRecoveryHash(parsed);
+        if (expectedDigest && expectedDigest !== digest) throw new Error("The recovery differs from the request link. Do not sign it.");
+        if (parsed.account !== getAddress(state.account) || parsed.newController !== getAddress(state.newController)) throw new Error("The request display does not match its signing data.");
+        expectedDigest = digest;
+        setURL({ digest });
+        if (!alive || version !== sequence || signing) return;
+        const titles = { publishing: "Publishing your request", "awaiting-approvals": "Waiting for your guardians", "quorum-ready": "Guardian quorum reached", submitting: "Submitting guardian approvals", "waiting-period": "Recovery waiting period", ready: "Ready to restore access", recovered: "Access restored", invalidated: "This request is no longer valid" };
+        const signer = signerAddress();
+        const eligible = signer && state.guardians.some((g) => g.toLowerCase() === signer.toLowerCase());
+        const signed = signer && state.signers.some((g) => g.toLowerCase() === signer.toLowerCase());
+        frame(titles[state.phase] || "Recovery progress", `<div class="vc-summary"><div><span class="vc-state ${state.finalized ? "vc-ok" : ""}">${state.finalized ? "Same account. Restored control." : state.phase === "waiting-period" || state.phase === "ready" ? `Ready after ${escape(new Date(state.pending.readyAt * 1000).toLocaleTimeString())}` : `${state.approved} of ${state.threshold} approvals`}</span><h3>${state.finalized ? "Your funds are still at the original address" : "Your guardians approve the replacement controller"}</h3></div></div><p class="vc-fine">Protected account</p>${fullAddress(state.account)}<p class="vc-fine">Replacement controller</p>${fullAddress(state.newController)}<div class="vc-guardian-list">${state.guardians.filter((g) => !/^0x0+$/.test(g)).map((g) => `<div>${addressChip(g)}<span>${state.signers.some((s) => s.toLowerCase() === g.toLowerCase()) ? "Approved" : state.pending || state.finalized ? "Quorum accepted on-chain" : "Awaiting approval"}</span></div>`).join("")}</div>${state.phase === "waiting-period" ? '<p class="vc-fine">The three-minute waiting period is enforced by the contract. The original controller can cancel before it finishes.</p>' : ""}${state.operation ? `<div class="vc-txlist">${txLink(state.operation)}</div>` : ""}<p class="vc-fine">${connectionLabel()}</p><div class="vc-enter-actions"><button class="text-button" id="vw-share">Copy guardian request link</button>${!state.finalized && state.phase !== "invalidated" ? '<button class="text-button" id="vw-connect-guardian">Connect signing wallet</button>' : ""}${eligible && !signed && state.phase === "awaiting-approvals" ? '<button class="button" id="vw-approve">Approve this recovery</button>' : ""}${state.phase === "quorum-ready" ? '<button class="button" id="vw-submit">Submit approved recovery</button>' : ""}${state.phase === "ready" ? '<button class="button" id="vw-finalize">Restore access</button>' : ""}${state.finalized ? '<button class="button" id="vw-open-restored">Open recovered account</button>' : ""}</div><div id="vw-picker"></div><p id="vw-error" class="error" role="alert"></p>${!state.complete ? '<p class="vc-note vc-warn">The approval scan is incomplete. Quorum cannot be claimed.</p>' : ""}`, "recover");
+        container.querySelector("#vw-share").onclick = () => { const link = url(); link.search = ""; link.searchParams.set("recovery", id); link.searchParams.set("digest", expectedDigest); link.searchParams.set("voxy-mode", "guardian"); navigator.clipboard.writeText(link.href).catch(notice); };
+        container.querySelector("#vw-connect-guardian")?.addEventListener("click", (event) => { signing = true; clearTimeout(poll); connect(event.currentTarget, () => { signing = false; check(); }).finally(() => { signing = false; if (alive && version === sequence) poll = setTimeout(check, 5000); }); });
+        container.querySelector("#vw-approve")?.addEventListener("click", (event) => { signing = true; clearTimeout(poll); action(event.currentTarget, "Signing guardian approval…", async () => { const signature = await sign(recoveryData(state.typedData.message, state.account, state.newController, expectedDigest), signer); await api.approve(id, signature); }).finally(() => { signing = false; check(); }); });
+        container.querySelector("#vw-submit")?.addEventListener("click", (event) => action(event.currentTarget, "Submitting…", async () => { await api.submit(id); check(); }));
+        container.querySelector("#vw-finalize")?.addEventListener("click", (event) => { signing = true; clearTimeout(poll); action(event.currentTarget, "Submitting finalization…", async () => { const op = await api.finalize(state.account); watchOperation(op.id, state.account); }).finally(() => { signing = false; }); });
+        container.querySelector("#vw-open-restored")?.addEventListener("click", () => showAccount(state.account));
+        if (!state.finalized && state.phase !== "invalidated") poll = setTimeout(check, 5000);
+      } catch (error) { if (alive && version === sequence) { notice(error); poll = setTimeout(check, 8000); } }
+    };
+    check();
+  }
+  async function boot() {
+    frame("Opening your wallet", '<div class="vc-loading">Verifying the Sepolia recovery deployment…</div>');
+    try {
+      const config = await api.config();
+      if (!approvedDeployment || config.implementation.toLowerCase() !== approvedDeployment.implementation.toLowerCase() || config.rosterSource.toLowerCase() !== approvedDeployment.rosterSource.toLowerCase()) throw new Error("This recovery deployment is not approved by the wallet release.");
+      network = { chainId: "0xaa36a7", chainName: "Sepolia", rpcUrls: [approvedDeployment.rpc], nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 }, blockExplorerUrls: ["https://sepolia.etherscan.io"] };
+      const reader = createPublicClient({ chain: sepolia, transport: http(approvedDeployment.rpc) });
+      const [implementation, source] = await Promise.all([reader.getCode({ address: approvedDeployment.implementation }), reader.getCode({ address: approvedDeployment.rosterSource })]);
+      if (!implementation || !source || keccak256(implementation) !== approvedDeployment.implementationCodeHash || keccak256(source) !== approvedDeployment.rosterCodeHash) throw new Error("The public recovery bytecode does not match this wallet release.");
+      if (!alive) return;
+      const params = url().searchParams;
+      const request = params.get("recovery");
+      const account = params.get("account");
+      const operation = params.get("operation");
+      const native = params.get("native");
+      if (request && /^0x[0-9a-f]{64}$/i.test(request)) return watchRecovery(request, params.get("digest"));
+      if (account && isAddress(account, { strict: false })) { activeAccount = account; if (native) return watchOperation(native, account, true); if (operation) return watchOperation(operation, account); return showAccount(account); }
+      const page = params.get("voxy-mode") || (mode === "recover" ? "recover" : "wallet");
+      go(page);
+    } catch (error) { frame("Recovery is unavailable", `<p class="vc-note vc-warn">${escape(errorMessage(error))}</p><p class="vc-fine">Your keys and existing on-chain funds remain yours. Try again when the recovery service is available.</p><button class="text-button" id="vw-boot-retry">Retry</button>`); container.querySelector("#vw-boot-retry").onclick = boot; }
+  }
+  touch();
+  boot();
+  return () => { alive = false; local = null; stop(); clearTimeout(idle); providerCleanup?.(); container.removeEventListener("pointerdown", touch); container.removeEventListener("keydown", touch); dialog?.classList.remove("vc-dialog"); };
 }
