@@ -62,7 +62,7 @@ const gas = await reader.estimateGas({
   }),
 });
 const block = await reader.getBlock();
-const perTransactionCeiling = block.gasLimit / 2n < 16700000n ? block.gasLimit / 2n : 16700000n;
+const perTransactionCeiling = block.gasLimit / 2n < 18500000n ? block.gasLimit / 2n : 18500000n;
 const sourceGas = (gas * 5n) / 4n;
 if (sourceGas > perTransactionCeiling)
   throw new Error("Source deployment exceeds the transaction gas ceiling");
