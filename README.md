@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/logo.jpg" alt="Voxy Logo" width="140" style="border-radius: 20px;" />
+
 # VOXY
 
 **Identity-anchored, add-only social recovery for existing EOAs via EIP-7702 and ENSv2.**
@@ -8,19 +10,15 @@
 
 </div>
 
----
-
 ## 01. Executive Summary
 
-Voxy is an account recovery architecture that anchors guardian rosters to mutable ENSv2 identity namespaces, coordinates ephemeral approvals over a decentralized database layer, and enforces execution policy across disparate networks without requiring asset migration.
+Voxy enables existing Externally Owned Accounts (EOAs) to establish cross-chain social recovery without asset migration. Guardian rosters anchor to human-readable ENSv2 namespaces rather than static cryptographic keys, approvals coordinate ephemerally over Arkiv, and policy executes on an alternative mempool chain.
 
-By combining EIP-7702 code delegation on Ethereum Sepolia with validation-phase policy enforcement on an alternative mempool execution chain, Voxy guarantees that existing Externally Owned Accounts (EOAs) can establish cross-chain social recovery where guardians are human-readable identities rather than fragile, static cryptographic keys. Recovery execution is strictly add-only: a verified guardian quorum installs a new authorized co-signer alongside existing keys, eliminating the risk of guardian-driven asset confiscation.
+By combining EIP-7702 code delegation on Ethereum Sepolia with validation-phase policy enforcement on an alternative mempool execution chain, Voxy ensures that guardian management reflects live identity state rather than frozen key assignments. Recovery execution is strictly add-only: a verified guardian quorum installs a new authorized co-signer alongside the existing key, mathematically precluding guardian-driven asset confiscation.
 
----
+## 02. The Problem: Static Trust Fails
 
-## 02. The Problem — Static Trust Fails
-
-Conventional smart account social recovery relies on assumptions that create systemic fragility:
+Conventional smart account social recovery relies on assumptions that create systemic operational fragility:
 
 1. **Static Hexadecimal Addressing:** Guardians are configured as raw `0x` addresses. If a guardian rotates their key, migrates devices, or suffers an operational compromise, their guardian status is silently invalidated or frozen unless the wallet owner executes an on-chain transaction to replace them.
 2. **Account Replacement and Asset Migration:** Recovering a conventional wallet typically requires deploying an entirely new contract account and executing an asset sweep. This breaks DeFi collateral positions, invalidates soulbound tokens, resets on-chain credit history, and triggers taxable disposal events.
@@ -35,15 +33,13 @@ Conventional smart account social recovery relies on assumptions that create sys
 | **Mempool Execution** | Canonical mempool (subject to storage isolation) | EIP-8141 Frame Transactions on an Alternative Mempool |
 | **Approval Coordination** | Centralized relayer or off-chain database | Ephemeral, auto-expiring entities on Arkiv |
 
----
-
 ## 03. The Protocol Model
 
 The Voxy protocol separates identity truth, cross-chain attestation, approval coordination, and on-chain enforcement across three dedicated network layers.
 
 ```mermaid
 flowchart TD
-    subgraph L1["ETHEREUM SEPOLIA — Identity Anchor"]
+    subgraph L1["ETHEREUM SEPOLIA: Identity Anchor"]
         direction TB
         ENS["ENSv2 UserRegistry<br/>(Subnames: g1, g2, g3)"]
         PUB["contracts/sepolia/RosterPublisher.sol"]
@@ -69,7 +65,7 @@ flowchart TD
         API -->|Queries state| L2
     end
 
-    subgraph L2["ALT-MEMPOOL DEVNET — Execution & Enforcement"]
+    subgraph L2["ALT-MEMPOOL DEVNET: Execution & Enforcement"]
         direction TB
         REG["contracts/devnet/RosterRegistry.sol<br/>(Enforces Asymmetric Delays)"]
         WAL["contracts/devnet/VoxyWallet.sol<br/>(Add-Only Recovery Wallet)"]
@@ -91,23 +87,21 @@ flowchart TD
 
 * **Sepolia Identity Anchor:** Houses the authoritative ENSv2 `UserRegistry`. Guardian slots (`g1`, `g2`, `g3`) and quorum thresholds are maintained as native subname records. `RosterPublisher.sol` reads this state and emits monotonic epoch updates.
 * **Cross-Chain Attestation Layer:** Translates Sepolia roster changes to execution networks. A fixed 2-of-3 attester set observes `RosterChanged` events, recomputes the cryptographic hash, signs an EIP-712 `RosterAttestation`, and submits it to `RosterRegistry.sol`.
-* **Decentralized Coordination Layer (Arkiv):** A queryable, decentralized database chain (Rabdi) that stores recovery requests and guardian approvals. Entities carry native block-height expiries matching the request deadline. Arkiv acts strictly as a discovery carrier; on-chain contracts independently verify all cryptographic signatures.
+* **Decentralized Coordination Layer (Arkiv):** A queryable, decentralized database chain (Rabdi) that stores recovery requests and guardian approvals. Entities carry native block-height expiries matching the request deadline. Arkiv functions strictly as a discovery carrier. On-chain contracts independently verify all cryptographic signatures.
 * **Devnet Execution Layer:** Enforces guardian recovery policy. `VoxyWallet.sol` executes standard transaction recoveries, while `VoxyWalletFrame` executes via EIP-8141 validation frames admitted by the staked alternative mempool.
-
----
 
 ## 04. Four Architectural Pillars
 
-### A. Mutable Guardian Identity — ENSv2
+### A. Mutable Guardian Identity (ENSv2)
 
 Traditional social recovery binds security to ephemeral cryptographic keypairs. Voxy binds security to identity records.
 
-Each user operates a dedicated ENSv2 `UserRegistry` deployed via a verifiable factory. Guardians occupy structural subname slots:
+Each user operates a dedicated ENSv2 `UserRegistry` deployed via a factory. Guardians occupy structural subname slots:
 * `g1.user.eth`
 * `g2.user.eth`
 * `g3.user.eth`
 
-When a guardian rotates their underlying wallet, they update their own ENS name resolution on Sepolia. `RosterPublisher.sol` reads slot owners directly from the registry at call time (`getState`), evaluating expiration timestamps and token status dynamically. The wallet owner does not execute a transaction to update their guardian set; the identity layer absorbs the rotation.
+When a guardian rotates their underlying wallet, they update their own ENS name resolution on Sepolia. `RosterPublisher.sol` reads slot owners directly from the registry at call time (`getState`), evaluating expiration timestamps and token status dynamically. The wallet owner does not execute a transaction to update their guardian set. Instead, the identity layer absorbs key rotations at resolution time.
 
 ### B. Add-Only Recovery
 
@@ -129,7 +123,7 @@ function executeRecovery() external {
 
 The smart contract contains no internal routines to delete existing owners, sweep token balances, transfer native currency, or alter the guardian registry pointer. Recovery is strictly an authorization addition: the recovered key becomes an authorized co-signer alongside the original owner.
 
-### C. EOA Continuity — EIP-7702
+### C. EOA Continuity via EIP-7702
 
 Voxy eliminates the requirement for asset migration through EIP-7702 code delegation.
 
@@ -146,36 +140,62 @@ Cross-chain synchronization employs asymmetric time-locks to eliminate the risk 
 * **Security Weakening (Delayed):** Adding a new guardian or lowering the quorum threshold on Sepolia triggers an on-chain delay (`addDelay`, e.g., 48 hours) in `RosterRegistry.sol`. The new guardian remains flagged as inactive:
   $$\text{activeAt}[i] = \text{block.timestamp} + \text{addDelay}$$
 
+```mermaid
+flowchart LR
+    subgraph REV["Guardian Revocation (Instant Policy: t = 0)"]
+        direction TB
+        R1["Sepolia event emitted"] --> R2["2-of-3 attestation signed"]
+        R2 --> R3["Guardian removed immediately<br/>Neutralizes compromised devices"]
+    end
+
+    subgraph ADD["Guardian Addition (Defensive Delay: t + addDelay)"]
+        direction TB
+        A1["Sepolia event emitted"] --> A2["2-of-3 attestation signed"]
+        A2 --> A3["Observation window armed<br/>activeAt = now + addDelay"]
+        A3 -->|Owner detects rogue addition| A4["freeze() permanently halts wallet"]
+        A3 -->|Window elapses cleanly| A5["Guardian becomes active"]
+    end
+
+    subgraph REC["Recovery Execution (Veto Window: t + recoveryDelay)"]
+        direction TB
+        C1["Quorum verified on-chain"] --> C2["Recovery timelock armed<br/>readyAt = now + recoveryDelay"]
+        C2 -->|Primary keyholder cancels| C3["freeze() permanently halts wallet"]
+        C2 -->|Delay window elapses| C4["_addOwner(newKey) installs co-signer"]
+    end
+```
+
+| Operation | Latency Policy | Effective Timestamp | Security Objective |
+| :--- | :--- | :--- | :--- |
+| **Guardian Revocation** | Immediate | $t = 0$ | Rapid neutralization of compromised guardian devices |
+| **Threshold Increase** | Immediate | $t = 0$ | Instantly strengthens policy without timelock exposure |
+| **Guardian Addition** | Delayed | $t + \text{addDelay}$ | Observation window gives owner time to detect and freeze rogue additions |
+| **Threshold Decrease** | Delayed | $t + \text{addDelay}$ | Prevents attesters from abruptly lowering quorum requirements |
+| **Recovery Execution** | Delayed | $t + \text{recoveryDelay}$ | Provides grace period for primary keyholder to veto unauthorized recovery |
+
 If attesters attempt to insert a fraudulent guardian, the addition is frozen in an observation window. The wallet owner's automated watcher detects the pending addition, enabling the owner to invoke `freeze()` from their cold key and permanently block the recovery pipeline.
 
----
+## 05. Recovery: State Transitions
 
-## 05. Recovery — Four State Transitions
-
-```
-[ State 01: Active ]
-       │
-       │ User initiates recovery with newKey
-       ▼
-[ State 02: Quorum Pending ] ◀─── Guardians sign EIP-712 digests on Arkiv
-       │
-       │ Threshold met (2-of-3) & requestRecovery() called
-       ▼
-[ State 03: Time-Lock Armed ] ─── Owner detects attack? ──▶ [ State 05: Frozen ]
-       │                                                         (Halted permanently)
-       │ block.timestamp >= readyAt (Delay elapsed)
-       ▼
-[ State 04: Finalized ] ─── _addOwner(newKey) installed
+```mermaid
+stateDiagram-v2
+    direction TB
+    [*] --> Active: EOA delegated to VoxyDelegate
+    Active --> QuorumPending: Primary key lost; recovery request published to Arkiv
+    QuorumPending --> TimelockArmed: Threshold met; requestRecovery() verified on-chain
+    TimelockArmed --> Frozen: Owner detects rogue recovery and invokes freeze()
+    TimelockArmed --> Finalized: Delay elapses; executeRecovery() adds co-signer
+    Frozen --> [*]: Wallet permanently halted
+    Finalized --> Active: Recovered co-signer operates account
 ```
 
-### Stage 01: Provisioning & Identity Anchoring
+### Stage 01: Provisioning and Identity Anchoring
 * The owner configures guardian subnames (`g1`, `g2`, `g3`) in their ENSv2 `UserRegistry`.
 * Quorum threshold policy is set as an ENS text record (`voxy.threshold`).
 * `RosterPublisher.sol` computes the canonical roster hash and emits `RosterChanged`.
 * 2-of-3 attesters sign a `RosterAttestation`, and `RosterRegistry.sol` initializes the roster on the execution chain.
 * The user delegates their EOA to `VoxyDelegate.sol` via EIP-7702.
 
-### Stage 02: Key Loss & Intent Broadcast
+### Stage 02: Key Loss and Intent Broadcast
 * The owner loses their primary signing device and generates a fresh replacement address (`newKey`).
 * The owner constructs a `RecoveryDigest` containing the wallet address, `newKey`, current `ownerEpoch`, current `rosterEpoch`, and a unique single-use 32-byte `requestId`.
 * The request is published to Arkiv under the schema `voxy_recovery_request_v1`.
@@ -186,7 +206,7 @@ If attesters attempt to insert a fraudulent guardian, the addition is frozen in 
 * Signatures are submitted as `voxy_guardian_approval_v1` entities on Arkiv, carrying a native block-height expiry equal to the request deadline.
 * The permissionless assembler pulls approvals, verifies signatures against `RosterRegistry.isActiveGuardian()`, and deduplicates signers.
 
-### Stage 04: Timelocked Co-Signer Injection
+### Stage 04: Timelocked Co-Signer Activation
 * The assembler broadcasts `VoxyWallet.requestRecovery(digest, signatures)`.
 * The contract verifies:
   1. `digest.deadline >= block.timestamp`
@@ -195,8 +215,6 @@ If attesters attempt to insert a fraudulent guardian, the addition is frozen in 
   4. Distinct valid guardian approvals $\ge \text{threshold}$.
 * The contract sets `pending = Pending({ key: newKey, readyAt: block.timestamp + recoveryDelay, requestId })`.
 * Once the delay window elapses, anyone triggers `executeRecovery()`. The contract executes `_addOwner(newKey)` and clears the pending state.
-
----
 
 ## 06. Security Model & Trust Assumptions
 
@@ -222,8 +240,6 @@ EIP-7702 delegation operates in the account's execution context. Because the und
 
 To achieve inclusion, the wallet deposits an economic bond of 0.012 ETH into the devnet `stakingRegistry`. The alternative mempool bundler admits the transaction based on this stake, which is slashable if the validation frame is abused to execute state-invalidation spam attacks.
 
----
-
 ## 07. Repository Topology
 
 ```text
@@ -232,15 +248,19 @@ voxy/
 │   ├── api/                           # On-chain orchestration & state gateway
 │   │   └── src/
 │   │       ├── actions.ts             # Recovery digest building & execution dispatch
+│   │       ├── coordinator.ts         # Guardian coordination hub & live status cache
 │   │       ├── guardians.ts           # ENSv2 resolution & minimal-diff Sepolia writes
-│   │       ├── server.ts              # Native HTTP engine (capped streaming reader)
+│   │       ├── server.ts              # Native HTTP engine & endpoint routing
 │   │       └── state.ts               # Live multi-chain state & verification aggregator
 │   └── web/                           # Client interface & live recovery console
 │       └── src/
 │           ├── api.js                 # API client wrapper
+│           ├── console.css            # Scoped styles for recovery console & coordinator
 │           ├── console.js             # Recovery console DOM controller & tab engine
-│           ├── main.js                # Core landing page & scroll orchestration
+│           ├── main.js                # Landing page & scroll orchestration
 │           └── style.css              # Typography & layout stylesheets
+├── assets/                            # Brand assets & documentation media
+│   └── logo.jpg                       # Official Voxy brand mark
 ├── contracts/
 │   ├── devnet/                        # Execution layer smart contracts
 │   │   └── src/
@@ -266,8 +286,6 @@ voxy/
 ├── package.json                       # Root workspace manifest (pnpm 10.30.2)
 └── pnpm-workspace.yaml                # Monorepo package declarations
 ```
-
----
 
 ## 08. Local Development
 
@@ -334,8 +352,6 @@ pnpm --filter @voxy/web dev
 
 Open `http://localhost:5173` to access the local recovery console.
 
----
-
 ## 09. Verified Deployments & On-Chain Artifacts
 
 All contract instances below are deployed, verified, and operational on public testnets.
@@ -364,8 +380,6 @@ All contract instances below are deployed, verified, and operational on public t
 * **Configured Writer Account:** `0x3915753836031a63B6462310f511B4F0E660Ff47`
 * **Verified Coordination Lifecycle Tx:** `0x4c13b921b71295c58f2eb9c0cc536c98a414f9f4f57a2c4eef5d8d5de4bfe653`
 
----
-
 ## 10. Limitations & Technical Roadmap
 
 To maintain engineering transparency, the operational boundaries of the current implementation are categorized below:
@@ -380,6 +394,6 @@ To maintain engineering transparency, the operational boundaries of the current 
 * **2-of-3 Attestation Bridge:** Cross-chain roster synchronization currently relies on a designated multi-attester set. While asymmetric time-locks prevent malicious guardian additions, true trust minimization requires moving to zero-knowledge state-root proofs as L2 rollup bridge standards mature.
 
 ### Experimental Scope & Honest Boundaries
-* **EIP-7702 Tooling Maturity:** EIP-7702 delegation flows are demonstrated live on Sepolia using Foundry test harnesses and pre-signed delegation tuples. Mainstream wallet UI support (e.g., standard MetaMask delegation signing prompts) remains dependent on broader ecosystem adoption of the EIP.
+* **EIP-7702 Tooling Maturity:** EIP-7702 delegation flows are demonstrated live on Sepolia using Foundry test harnesses and pre-signed delegation tuples. Mainstream wallet UI support (such as standard MetaMask delegation signing prompts) remains dependent on broader wallet and client library adoption of the specification.
 * **Singleton Testnet Contention:** The current public devnet demo instance references a shared singleton contract (`0xb7d8...807E`). An active recovery locks the initiation interface until the time-lock window completes. Production deployment employs deterministic factory deployments (`CREATE2`) to provision isolated smart account instances per user.
-* **Protocol Disclaimers:** Voxy is an experimental hackathon implementation. Guardian data on Arkiv is publicly readable on-chain, and expiration does not retract off-chain copies. Testnet states may be subject to periodic resets. ENSignv2 is referenced solely as a design benchmark; all code in this repository was authored from scratch.
+* **Protocol Disclaimers:** Voxy is an experimental hackathon implementation. Guardian data on Arkiv is publicly readable on-chain, and expiration does not retract off-chain copies. Testnet states may be subject to periodic resets. ENSignv2 is referenced solely as a design benchmark. All contracts and packages in this repository were authored from scratch.
