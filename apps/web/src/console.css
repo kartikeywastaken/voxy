@@ -205,3 +205,31 @@ dialog.vc-dialog .vc-walletbar-row input {
   font-variant-numeric: tabular-nums;
 }
 dialog.vc-dialog .vc-progress { font-family: "Sora", sans-serif; letter-spacing: -0.015em; }
+
+/* account switcher (when an owner holds more than one Voxy account) */
+dialog.vc-dialog .vc-account-select { display: block; margin-top: 2px; }
+dialog.vc-dialog .vc-account-select select {
+  width: 100%;
+  margin-top: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--white);
+  color: var(--ink);
+  font-family: "DM Mono", monospace;
+  font-size: 13px;
+  cursor: pointer;
+}
+dialog.vc-dialog .vc-account-select select:focus { outline: 2px solid var(--accent); border-color: transparent; }
+dialog.vc-dialog .vc-account-hint { display: block; margin-top: 8px; }
+
+/* entry secondary links + guardian request cards */
+dialog.vc-dialog .vc-entry-links { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+dialog.vc-dialog .vc-req {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px;
+  margin-top: 12px;
+}
+dialog.vc-dialog .vc-req .button { width: 100%; margin-top: 12px; }
+dialog.vc-dialog #vc-g-list { margin: 6px 0; }

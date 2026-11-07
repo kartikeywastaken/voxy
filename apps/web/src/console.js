@@ -68,6 +68,7 @@ export function mountConsole(container, mode) {
     draft: null,
     provider: null,
     owner: null,
+    guardian: null,
     recovery: null,
   };
   let timer;
@@ -164,13 +165,36 @@ export function mountConsole(container, mode) {
   /* ---------------------------------------------------------- entry gate */
   function renderEntry() {
     clearTimer();
-    container.innerHTML = `
+    const recover = mode === "recover";
+    container.innerHTML = recover
+      ? `
       <div class="vc-head">
         <span class="preview-label">Voxy recovery</span>
-        <h2 class="vc-title">${mode === "recover" ? "Recover a wallet" : "Protect a wallet"}</h2>
+        <h2 class="vc-title">Recover an account</h2>
       </div>
       <form id="vc-enter" class="vc-enter" novalidate>
-        <label for="vc-wallet">${mode === "recover" ? "Which wallet do you want to recover?" : "Which wallet do you want to protect?"}</label>
+        <label for="vc-wallet">Address of the account you lost access to</label>
+        <div class="vc-walletbar-row">
+          <input id="vc-wallet" placeholder="0x… the Voxy account you're recovering" autocomplete="off" spellcheck="false" />
+          <button class="button button-small" type="submit">Find account</button>
+        </div>
+        <p id="vc-wallet-err" class="error" role="alert"></p>
+        <p class="vc-fine"><b>You don't need the lost wallet or its keys.</b> Enter the account's address — your guardians approve a new owner you control, and after a short wait you are back in. If you only have your old owner address, enter it and we'll find the accounts it owned.</p>
+        <div class="vc-entry-links">
+          <button type="button" class="text-button" id="vc-demo">Try it on the demo account →</button>
+          <button type="button" class="text-button" id="vc-guardian-mode">I'm a guardian — approve a request →</button>
+        </div>
+      </form>
+      <div class="vc-foot">
+        <span class="vc-dim">Live reads · Sepolia + alt-mempool devnet</span>
+      </div>`
+      : `
+      <div class="vc-head">
+        <span class="preview-label">Voxy recovery</span>
+        <h2 class="vc-title">Protect a wallet</h2>
+      </div>
+      <form id="vc-enter" class="vc-enter" novalidate>
+        <label for="vc-wallet">Which wallet do you want to protect?</label>
         <button type="button" class="button" id="vc-connect">Connect wallet</button>
         <div id="vc-wallets" class="vc-wallets"></div>
         <div class="vc-or"><span>or enter an address</span></div>
@@ -180,7 +204,8 @@ export function mountConsole(container, mode) {
         </div>
         <p id="vc-wallet-err" class="error" role="alert"></p>
         <button type="button" class="text-button" id="vc-demo">Use the live demo wallet →</button>
-        <p class="vc-fine">Connect your wallet or enter any address to read its live on-chain state. This testnet demo signs guardian &amp; recovery actions for the demo wallet, whose keys the server holds.</p>
+        <p class="vc-fine">Connect your wallet (or paste an address) to manage the Voxy accounts it owns, or create one. The demo account signs guardian actions with server-held keys.</p>
+        <button type="button" class="text-button" id="vc-guardian-mode">I'm a guardian — approve a request →</button>
       </form>
       <div class="vc-foot">
         <span class="vc-dim">Live reads · Sepolia + alt-mempool devnet</span>
@@ -200,7 +225,7 @@ export function mountConsole(container, mode) {
       }
       go(v);
     });
-    container.querySelector("#vc-connect").addEventListener("click", (e) =>
+    container.querySelector("#vc-connect")?.addEventListener("click", (e) =>
       doConnect(
         e.currentTarget,
         container.querySelector("#vc-wallet-err"),
@@ -209,6 +234,104 @@ export function mountConsole(container, mode) {
       ),
     );
     container.querySelector("#vc-demo").addEventListener("click", () => go(undefined));
+    container.querySelector("#vc-guardian-mode")?.addEventListener("click", renderGuardian);
+  }
+
+  /* --------------------------------- guardian: approve requests waiting for me */
+  async function renderGuardian() {
+    clearTimer();
+    clearPoll();
+    container.innerHTML = `
+      <div class="vc-head">
+        <span class="preview-label">Voxy recovery</span>
+        <h2 class="vc-title">Approve a recovery</h2>
+      </div>
+      <div class="vc-enter">
+        <p class="vc-fine">Someone you guard is recovering their account. Connect the wallet you were added as a guardian with — Voxy shows the requests waiting for your approval and you sign each in one click.</p>
+        <button type="button" class="button" id="vc-g-connect">Connect guardian wallet</button>
+        <div id="vc-g-wallets" class="vc-wallets"></div>
+        <p id="vc-g-err" class="error" role="alert"></p>
+        <div id="vc-g-list"></div>
+        <button type="button" class="text-button" id="vc-g-back">← Back</button>
+      </div>
+      <div class="vc-foot"><span class="vc-dim">Live reads · Sepolia + alt-mempool devnet</span></div>`;
+    container.querySelector("#vc-g-back").addEventListener("click", renderEntry);
+    container.querySelector("#vc-g-connect").addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      const err = container.querySelector("#vc-g-err");
+      err.textContent = "";
+      try {
+        if (!view.provider) {
+          const wallets = await discoverWallets();
+          if (!wallets.length) throw new Error("No wallet found. Install MetaMask/Rainbow to approve.");
+          if (wallets.length > 1) {
+            await doConnect(btn, err, container.querySelector("#vc-g-wallets"), (addr) =>
+              loadGuardianRequests(addr),
+            );
+            return;
+          }
+          view.provider = wallets[0].provider;
+        }
+        loadGuardianRequests(await requestAccount(view.provider));
+      } catch (e2) {
+        err.textContent = e2.message;
+      }
+    });
+  }
+
+  async function loadGuardianRequests(guardian) {
+    view.guardian = guardian;
+    const list = container.querySelector("#vc-g-list");
+    const err = container.querySelector("#vc-g-err");
+    list.innerHTML = `<div class="vc-note"><span class="status-dot"></span> Checking for requests that need you…</div>`;
+    let requests;
+    try {
+      ({ requests } = await api.pendingForGuardian(guardian));
+    } catch (e2) {
+      list.innerHTML = "";
+      err.textContent = e2.message;
+      return;
+    }
+    if (!requests.length) {
+      list.innerHTML = `<div class="vc-note">No recovery requests are waiting for <code>${short(guardian)}</code> right now. When someone you guard starts a recovery, it appears here.</div>`;
+      return;
+    }
+    list.innerHTML = requests
+      .map(
+        (r) => `
+      <div class="vc-req" data-id="${r.id}">
+        <div class="vc-seclabel"><span class="vc-secn">↻</span>Recovery request</div>
+        ${row("Account", chip(r.wallet))}
+        ${row("New owner", chip(r.newKey))}
+        <div class="vc-progress">Approved <b>${r.approved}</b> <span class="vc-dim">of ${r.threshold}</span></div>
+        <button class="button vc-g-approve" data-id="${r.id}" ${r.alreadySigned ? "disabled" : ""}>${r.alreadySigned ? "You already approved ✓" : "Approve this recovery"}</button>
+        <p class="error vc-g-row-err" role="alert"></p>
+      </div>`,
+      )
+      .join("");
+    list.querySelectorAll(".vc-g-approve").forEach((btn) =>
+      btn.addEventListener("click", async () => {
+        const id = btn.dataset.id;
+        const req = requests.find((r) => r.id === id);
+        const rowErr = btn.parentElement.querySelector(".vc-g-row-err");
+        btn.disabled = true;
+        btn.textContent = "Approving in your wallet…";
+        try {
+          await switchToDevnet();
+          const sig = await view.provider.request({
+            method: "eth_signTypedData_v4",
+            params: [view.guardian, JSON.stringify(req.typedData)],
+          });
+          const st = await api.approveRecovery(id, sig);
+          btn.textContent = st.submitted ? "✓ Quorum reached — submitted" : "✓ You approved";
+          loadGuardianRequests(view.guardian);
+        } catch (e2) {
+          btn.disabled = false;
+          btn.textContent = "Approve this recovery";
+          rowErr.textContent = e2.message;
+        }
+      }),
+    );
   }
 
   /* -------------------------------------------------------------- loader */
@@ -487,7 +610,7 @@ export function mountConsole(container, mode) {
               : `Owned by <code>${short(s.owners?.[0] || s.wallet)}</code>. Account and guardian settings are read from chain.`
           }</p>
         </form>
-        ${(s.accounts?.length ?? 0) > 1 ? `<label class="vc-account-select">Your recovery accounts<select id="vc-account">${s.accounts.map((a) => `<option value="${a}" ${a.toLowerCase() === s.wallet.toLowerCase() ? "selected" : ""}>${a}</option>`).join("")}</select></label>` : ""}
+        ${(s.accounts?.length ?? 0) > 1 ? `<label class="vc-account-select">${mode === "recover" ? "Which account are you recovering?" : "Voxy accounts this wallet owns"}<select id="vc-account">${s.accounts.map((a) => `<option value="${a}" ${a.toLowerCase() === s.wallet.toLowerCase() ? "selected" : ""}>${a}</option>`).join("")}</select><span class="vc-fine vc-account-hint">${mode === "recover" ? "This wallet owns more than one Voxy account — pick the one you lost access to." : "This wallet owns more than one Voxy account. Pick the one to manage."}</span></label>` : ""}
         <nav class="vc-tabs" role="tablist">
           ${TABS.map(([id, label]) => `<button class="vc-tab ${view.tab === id ? "active" : ""}" data-tab="${id}" role="tab" aria-selected="${view.tab === id}">${label}</button>`).join("")}
         </nav>
