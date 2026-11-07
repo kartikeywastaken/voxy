@@ -261,6 +261,14 @@ EIP-7702 delegation operates in the account's execution context. Because the und
 
 To achieve inclusion, the wallet deposits an economic bond of 0.012 ETH into the devnet `stakingRegistry`. The alternative mempool bundler admits the transaction based on this stake, which is slashable if the validation frame is abused to execute state-invalidation spam attacks.
 
+### Ethereum Foundation CROPS Alignment
+Voxy's protocol architecture adheres to the Ethereum Foundation's **CROPS** framework for decentralized infrastructure:
+* **Censorship Resistance:** Approvals are portable EIP-712 cryptographic signatures. If the Arkiv coordination carrier is offline, signers can assemble and broadcast transactions permissionlessly via sovereign CLI strings (`voxy1:...`).
+* **Capture Resistance:** Add-only contract invariants prevent guardian quorums from hijacking ownership or draining assets. Asymmetric timelocks prevent rogue bridge attesters from altering rosters unnoticed.
+* **Open Source:** The entire monorepo (contracts, coordinator, assembler, and interface) is fully open-source with zero proprietary dependencies.
+* **Privacy:** Recovery requires zero KYC, zero centralized email/phone bindings, zero custodial intermediaries, and zero tracking analytics.
+* **Security:** Cryptographic verification is enforced on-chain via ECDSA `ecrecover` against live ENS identity state, shielded by asymmetric observation timelocks.
+
 ## 07. Repository Topology
 
 ```text
