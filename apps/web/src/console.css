@@ -123,3 +123,85 @@ dialog.vc-dialog {
 .vc-progress { font-size: 20px; margin: 16px 0 8px; letter-spacing: -0.01em; }
 .vc-progress b { color: var(--accent); font-size: 30px; font-weight: 600; }
 .vc-signers { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 4px; }
+
+/* ============================================================
+   Popup typography refinement — awwwards craft on Sora + DM Mono.
+   Scoped to the console dialog so the minified base styles stay put.
+   ============================================================ */
+dialog.vc-dialog {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "kern" 1;
+}
+
+/* Display headings: Sora, tight tracking, close leading, balanced wraps. */
+dialog.vc-dialog h2,
+dialog.vc-dialog .vc-title {
+  font-family: "Sora", sans-serif;
+  font-weight: 600;
+  font-size: clamp(23px, 4vw, 29px);
+  line-height: 1.05;
+  letter-spacing: -0.038em;
+  text-wrap: balance;
+}
+dialog.vc-dialog h3 {
+  font-family: "Sora", sans-serif;
+  font-weight: 600;
+  font-size: 17px;
+  line-height: 1.18;
+  letter-spacing: -0.022em;
+  margin: 0 0 5px;
+}
+
+/* One consistent instrument-label treatment for every mono label. */
+dialog.vc-dialog .preview-label,
+dialog.vc-dialog .vc-label,
+dialog.vc-dialog .vc-slot-tag,
+dialog.vc-dialog .vc-walletbar label,
+dialog.vc-dialog .vc-enter label,
+dialog.vc-dialog .vc-seclabel,
+dialog.vc-dialog .vc-account-select,
+dialog.vc-dialog .vc-or {
+  font-family: "DM Mono", monospace;
+  font-weight: 400;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+dialog.vc-dialog .preview-label { font-size: 10px; color: var(--muted); }
+dialog.vc-dialog .vc-seclabel { font-size: 10px; }
+
+/* Tabs and buttons in the display voice, tracked in. */
+dialog.vc-dialog .vc-tab { font-family: "Sora", sans-serif; font-size: 13px; letter-spacing: -0.01em; }
+dialog.vc-dialog .button {
+  font-family: "Sora", sans-serif;
+  font-weight: 600;
+  font-size: 13.5px;
+  letter-spacing: -0.006em;
+}
+dialog.vc-dialog .text-button {
+  font-family: "Sora", sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.006em;
+}
+
+/* Body copy: calm leading, gentle optical tracking. */
+dialog.vc-dialog p,
+dialog.vc-dialog .vc-fine,
+dialog.vc-dialog .vc-walletnote {
+  font-family: "Sora", sans-serif;
+  line-height: 1.58;
+  letter-spacing: -0.004em;
+}
+dialog.vc-dialog .vc-fine { font-size: 12.5px; color: var(--muted); }
+
+/* Data stays mono; give every figure tabular alignment. */
+dialog.vc-dialog .vc-chip,
+dialog.vc-dialog .vc-value,
+dialog.vc-dialog #vc-approved,
+dialog.vc-dialog .vc-progress,
+dialog.vc-dialog .vc-majority b,
+dialog.vc-dialog .vc-slot-input,
+dialog.vc-dialog .vc-walletbar-row input {
+  font-variant-numeric: tabular-nums;
+}
+dialog.vc-dialog .vc-progress { font-family: "Sora", sans-serif; letter-spacing: -0.015em; }
