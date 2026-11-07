@@ -33,6 +33,16 @@ export const api = {
   cancelRecovery: (wallet) => call("/api/recover/cancel", { method: "POST", body: JSON.stringify({ wallet }) }),
   createWallet: (owner) =>
     call("/api/wallet/create", { method: "POST", body: JSON.stringify({ owner }) }),
+  // --- recovery coordination hub ---
+  requestRecovery: (wallet, newKey) =>
+    call("/api/recover/request", { method: "POST", body: JSON.stringify({ wallet, newKey }) }),
+  getRecoveryRequest: (id) => call(`/api/recover/request?id=${encodeURIComponent(id)}`),
+  pendingForGuardian: (guardian) =>
+    call(`/api/recover/pending?guardian=${encodeURIComponent(guardian)}`),
+  approveRecovery: (id, signature) =>
+    call("/api/recover/approve", { method: "POST", body: JSON.stringify({ id, signature }) }),
+  demoApprove: (id) =>
+    call("/api/recover/demo-approve", { method: "POST", body: JSON.stringify({ id }) }),
 };
 
 export const short = (addr) => (addr ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : "—");

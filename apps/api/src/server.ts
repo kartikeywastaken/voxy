@@ -8,6 +8,13 @@ import {
   resolveGuardian,
   setGuardians,
 } from "./guardians.js";
+import {
+  approveRecovery,
+  demoApprove,
+  getRequest,
+  pendingForGuardian,
+  requestRecovery,
+} from "./coordinator.js";
 import { sponsoredWrite } from "./queue.js";
 import { walletState } from "./state.js";
 import { createWallet } from "./wallet.js";
@@ -81,6 +88,18 @@ const server = createServer(async (req, res) => {
       }
       return send(res, 200, await walletState(w));
     }
+    // --- recovery coordination hub (reads) ---
+    if (route === "GET /api/recover/request") {
+      const id = url.searchParams.get("id")?.trim();
+      if (!id) return send(res, 400, { error: "id is required" });
+      return send(res, 200, await getRequest(id));
+    }
+    if (route === "GET /api/recover/pending") {
+      const g = url.searchParams.get("guardian")?.trim();
+      if (!g || !isAddress(g, { strict: false })) return send(res, 400, { error: "guardian address required" });
+      return send(res, 200, { requests: await pendingForGuardian(getAddress(g)) });
+    }
+
     if (route === "GET /api/guardians") {
       const wallet = url.searchParams.get("wallet");
       if (wallet && !isAddress(wallet, { strict: false }))
@@ -140,6 +159,32 @@ const server = createServer(async (req, res) => {
           return setGuardians(input);
         }),
       );
+    }
+
+    // --- recovery coordination hub (writes) ---
+    if (route === "POST /api/recover/request") {
+      const body = await readJson(req);
+      if (typeof body.wallet !== "string" || !isAddress(body.wallet, { strict: false }))
+        return send(res, 400, { error: "wallet is required" });
+      if (typeof body.newKey !== "string" || !isAddress(body.newKey, { strict: false }))
+        return send(res, 400, { error: "newKey must be an address" });
+      return send(res, 200, await requestRecovery(getAddress(body.wallet), getAddress(body.newKey)));
+    }
+    if (route === "POST /api/recover/approve") {
+      const body = await readJson(req);
+      if (typeof body.id !== "string") return send(res, 400, { error: "id is required" });
+      if (typeof body.signature !== "string" || !/^0x[0-9a-f]{130}$/i.test(body.signature))
+        return send(res, 400, { error: "signature must be a 65-byte guardian signature" });
+      return send(
+        res,
+        200,
+        await sponsoredWrite(() => approveRecovery(body.id as string, body.signature as `0x${string}`)),
+      );
+    }
+    if (route === "POST /api/recover/demo-approve") {
+      const body = await readJson(req);
+      if (typeof body.id !== "string") return send(res, 400, { error: "id is required" });
+      return send(res, 200, await sponsoredWrite(() => demoApprove(body.id as string)));
     }
 
     if (route === "POST /api/recover/start" || route === "POST /api/recover/prepare") {
